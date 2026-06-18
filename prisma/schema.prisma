@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Gallery {
+  id        String       @id @default(cuid())
+  shop      String
+  name      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  tabs      GalleryTab[]
+
+  @@index([shop])
+}
+
+model GalleryTab {
+  id        String        @id @default(cuid())
+  galleryId String
+  title     String
+  position  Int           @default(0)
+  gallery   Gallery       @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  cards     GalleryCard[]
+
+  @@index([galleryId])
+}
+
+model GalleryCard {
+  id          String         @id @default(cuid())
+  tabId       String
+  title       String
+  subtitle    String         @default("")
+  description String         @default("")
+  color       String         @default("")
+  position    Int            @default(0)
+  tab         GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  photos      GalleryPhoto[]
+
+  @@index([tabId])
+}
+
+model GalleryPhoto {
+  id            String      @id @default(cuid())
+  cardId        String
+  shopifyFileId String?
+  url           String
+  alt           String      @default("")
+  position      Int         @default(0)
+  createdAt     DateTime    @default(now())
+  card          GalleryCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+}
+
+model WheelModelImage {
+  id            String   @id @default(cuid())
+  shop          String
+  modelCode     String
+  shopifyFileId String?
+  imageUrl      String
+  alt           String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, modelCode])
+  @@index([shop])
+}

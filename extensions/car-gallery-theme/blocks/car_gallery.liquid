@@ -1,0 +1,159 @@
+{% liquid
+  assign gallery_id = block.settings.gallery_id | strip
+%}
+
+<div
+  class="car-gallery"
+  data-car-gallery
+  data-gallery-id="{{ gallery_id | escape }}"
+  data-gallery-endpoint="{{ block.settings.gallery_endpoint | escape }}"
+  data-contact-anchor="{{ block.settings.contact_anchor | remove: '#' | escape }}"
+  style="
+    --car-gallery-columns: {{ block.settings.columns_desktop }};
+    --car-gallery-mobile-columns: {{ block.settings.columns_mobile }};
+    --car-gallery-gap: {{ block.settings.gap }}px;
+    --car-gallery-accent: {{ block.settings.accent_color }};
+    --car-gallery-card-bg: {{ block.settings.card_background }};
+    --car-gallery-card-text: {{ block.settings.card_text_color }};
+    --car-gallery-muted: {{ block.settings.muted_text_color }};
+  "
+  {{ block.shopify_attributes }}
+>
+  <div class="car-gallery__tabs" data-car-gallery-tabs aria-label="Gallery groups"></div>
+  <div class="car-gallery__panels" data-car-gallery-panels></div>
+
+  <div class="car-gallery__empty" data-car-gallery-empty hidden>
+    Create a gallery in the Car Gallery app, then paste its gallery ID here.
+  </div>
+
+  <script type="application/json" data-car-gallery-demo>
+    {
+      "tabs": [
+        {
+          "id": "featured",
+          "title": "Featured",
+          "cards": [
+            {
+              "title": "Porsche 992",
+              "subtitle": "Forged: Series 21",
+              "description": "S21-01",
+              "color": "Gloss Black",
+              "photos": []
+            },
+            {
+              "title": "Lexus GX",
+              "subtitle": "Hybrid Forged (6-Lug)",
+              "description": "HFX-1",
+              "color": "Brushed Clear",
+              "photos": []
+            },
+            {
+              "title": "Chevrolet C8 Corvette",
+              "subtitle": "Hybrid Forged (5 Lug)",
+              "description": "HFX-2",
+              "color": "Satin Silver",
+              "photos": []
+            },
+            {
+              "title": "Ferrari Purosangue",
+              "subtitle": "Novitec X Vossen",
+              "description": "NF10",
+              "color": "Gloss Black",
+              "photos": []
+            }
+          ]
+        }
+      ]
+    }
+  </script>
+</div>
+
+{% schema %}
+{
+  "name": "Car Gallery",
+  "target": "section",
+  "stylesheet": "car-gallery.css",
+  "javascript": "car-gallery.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "gallery_id",
+      "label": "Gallery ID",
+      "info": "You will copy this from the Car Gallery app."
+    },
+    {
+      "type": "text",
+      "id": "gallery_endpoint",
+      "label": "Gallery endpoint",
+      "default": "/apps/car-gallery",
+      "info": "Leave this unless you change the app proxy path."
+    },
+    {
+      "type": "text",
+      "id": "contact_anchor",
+      "label": "Product contact anchor",
+      "default": "contact-us",
+      "info": "The Contact us button opens the wheel product page and scrolls to this section ID. Do not include #."
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Cards per row on desktop",
+      "min": 2,
+      "max": 4,
+      "step": 1,
+      "default": 4
+    },
+    {
+      "type": "select",
+      "id": "columns_mobile",
+      "label": "Cards per row on mobile",
+      "options": [
+        {
+          "value": "1",
+          "label": "1"
+        },
+        {
+          "value": "2",
+          "label": "2"
+        }
+      ],
+      "default": "1"
+    },
+    {
+      "type": "range",
+      "id": "gap",
+      "label": "Gap between cards",
+      "min": 8,
+      "max": 48,
+      "step": 4,
+      "unit": "px",
+      "default": 32
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#e4002b"
+    },
+    {
+      "type": "color",
+      "id": "card_background",
+      "label": "Card background",
+      "default": "#ffffff"
+    },
+    {
+      "type": "color",
+      "id": "card_text_color",
+      "label": "Card text",
+      "default": "#000000"
+    },
+    {
+      "type": "color",
+      "id": "muted_text_color",
+      "label": "Muted text",
+      "default": "#8b8b8b"
+    }
+  ]
+}
+{% endschema %}

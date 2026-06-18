@@ -1,0 +1,33 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c6dc9be46a5cece104c1e97e199438b4"
+name = "car-gallery"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_files,write_files,write_app_proxy"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[app_proxy]
+url = "/gallery-proxy"
+subpath = "car-gallery"
+prefix = "apps"
