@@ -223,6 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           subtitle: getString(formData, "subtitle"),
           description: getString(formData, "description"),
           color: getString(formData, "color"),
+          flickrAlbumUrl: getString(formData, "flickrAlbumUrl"),
           position,
         },
       });
@@ -243,6 +244,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           subtitle: getString(formData, "subtitle"),
           description: getString(formData, "description"),
           color: getString(formData, "color"),
+          flickrAlbumUrl: getString(formData, "flickrAlbumUrl"),
         },
       });
 
@@ -600,6 +602,10 @@ export default function Index() {
                         <div className="cg-card-preview">
                           {card.photos[0] ? (
                             <img src={card.photos[0].url} alt={card.photos[0].alt} />
+                          ) : card.flickrAlbumUrl ? (
+                            <div className="cg-card-placeholder">
+                              Flickr album linked
+                            </div>
                           ) : (
                             <div className="cg-card-placeholder">{card.title}</div>
                           )}
@@ -627,6 +633,18 @@ export default function Index() {
                             <span>Color</span>
                             <input name="color" defaultValue={card.color} />
                           </label>
+                          <label>
+                            <span>Flickr album URL</span>
+                            <input
+                              name="flickrAlbumUrl"
+                              defaultValue={card.flickrAlbumUrl}
+                              placeholder="https://www.flickr.com/photos/rohanawheels/albums/72177720332457517/"
+                            />
+                          </label>
+                          <p className="cg-upload-help">
+                            Public Flickr album photos will display before saved
+                            Shopify photos.
+                          </p>
                           <button type="submit">Save card</button>
                         </AdminForm>
 
@@ -675,6 +693,13 @@ export default function Index() {
                     <label>
                       <span>Color</span>
                       <input name="color" placeholder="Gloss Black" />
+                    </label>
+                    <label className="cg-wide-field">
+                      <span>Flickr album URL</span>
+                      <input
+                        name="flickrAlbumUrl"
+                        placeholder="https://www.flickr.com/photos/rohanawheels/albums/72177720332457517/"
+                      />
                     </label>
                     <button type="submit">Add card</button>
                   </AdminForm>
@@ -1665,6 +1690,10 @@ const styles = `
     grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
     align-items: end;
     gap: 12px;
+  }
+
+  .cg-add-card .cg-wide-field {
+    grid-column: span 2;
   }
 
   .cg-add-tab {

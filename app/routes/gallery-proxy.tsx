@@ -2,6 +2,18 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+type GalleryPhotoResponse = {
+  id: string;
+  url: string;
+  alt: string;
+};
+
+type StoredGalleryPhoto = {
+  id: string;
+  url: string;
+  alt: string;
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.public.appProxy(request);
 
@@ -73,6 +85,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               wheelModelCode && !wheelModelImage?.imageUrl
                 ? await getProductFirstImageUrl(wheelModelCode)
                 : "";
+            const photos = await getCardPhotos(
+              card.flickrAlbumUrl,
+              card.photos,
+            );
 
             return {
               id: card.id,
@@ -88,11 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     productUrl: getProductUrl(wheelModelCode),
                   }
                 : null,
-              photos: card.photos.map((photo) => ({
-                id: photo.id,
-                url: photo.url,
-                alt: photo.alt,
-              })),
+              photos,
             };
           }),
         ),
@@ -102,6 +114,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 const SUPPORTED_WHEEL_PREFIXES = ["RFX", "RFC", "RFG", "RLB", "RPM", "RFL", "RC"];
+
+const FLICKR_DEFAULT_USER_NSID =
+  process.env.FLICKR_USER_NSID || "59355137@N05";
+const FLICKR_CACHE_MS = 10 * 60 * 1000;
+const flickrAlbumCache = new Map<
+  string,
+  { expiresAt: number; photos: GalleryPhotoResponse[] }
+>();
 
 function findWheelModelCode(...values: string[]) {
   const text = values.join(" ").toUpperCase();
@@ -115,6 +135,113 @@ function findWheelModelCode(...values: string[]) {
   }
 
   return "";
+}
+
+async function getCardPhotos(
+  flickrAlbumUrl: string,
+  storedPhotos: StoredGalleryPhoto[],
+) {
+  const savedPhotos = storedPhotos.map((photo) => ({
+    id: photo.id,
+    url: photo.url,
+    alt: photo.alt,
+  }));
+
+  if (!flickrAlbumUrl.trim()) {
+    return savedPhotos;
+  }
+
+  try {
+    const flickrPhotos = await getFlickrAlbumPhotos(flickrAlbumUrl);
+    return flickrPhotos.length ? flickrPhotos : savedPhotos;
+  } catch (error) {
+    return savedPhotos;
+  }
+}
+
+async function getFlickrAlbumPhotos(albumUrl: string) {
+  const albumParts = getFlickrAlbumParts(albumUrl);
+
+  if (!albumParts) {
+    return [];
+  }
+
+  const cacheKey = `${albumParts.nsid}:${albumParts.albumId}`;
+  const cached = flickrAlbumCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.photos;
+  }
+
+  const feedUrl = new URL("https://www.flickr.com/services/feeds/photoset.gne");
+  feedUrl.searchParams.set("set", albumParts.albumId);
+  feedUrl.searchParams.set("nsid", albumParts.nsid);
+  feedUrl.searchParams.set("lang", "en-us");
+  feedUrl.searchParams.set("format", "json");
+  feedUrl.searchParams.set("nojsoncallback", "1");
+
+  const response = await fetch(feedUrl);
+
+  if (!response.ok) {
+    throw new Error("Flickr album feed failed.");
+  }
+
+  const feed = (await response.json()) as {
+    items?: Array<{
+      title?: string;
+      link?: string;
+      media?: { m?: string };
+    }>;
+  };
+
+  const photos =
+    feed.items
+      ?.map((item, index) => {
+        const imageUrl = item.media?.m ? getLargeFlickrImageUrl(item.media.m) : "";
+
+        if (!imageUrl) return null;
+
+        return {
+          id:
+            getFlickrPhotoId(item.link || "") ||
+            `flickr-${albumParts.albumId}-${index + 1}`,
+          url: imageUrl,
+          alt: item.title || "Flickr gallery image",
+        };
+      })
+      .filter((photo): photo is GalleryPhotoResponse => Boolean(photo)) || [];
+
+  flickrAlbumCache.set(cacheKey, {
+    expiresAt: Date.now() + FLICKR_CACHE_MS,
+    photos,
+  });
+
+  return photos;
+}
+
+function getFlickrAlbumParts(value: string) {
+  const trimmedValue = value.trim();
+  const albumId =
+    trimmedValue.match(/\/(?:albums|sets)\/(\d+)/i)?.[1] ||
+    trimmedValue.match(/\b(\d{10,})\b/)?.[1] ||
+    "";
+
+  if (!albumId) return null;
+
+  const ownerPathValue = trimmedValue.match(/\/photos\/([^/?#]+)\//i)?.[1] || "";
+  const nsidQueryValue = trimmedValue.match(/[?&]nsid=([^&#]+)/i)?.[1] || "";
+  const decodedNsid = decodeURIComponent(nsidQueryValue || ownerPathValue);
+  const nsid = decodedNsid.includes("@") ? decodedNsid : FLICKR_DEFAULT_USER_NSID;
+
+  return { albumId, nsid };
+}
+
+function getLargeFlickrImageUrl(url: string) {
+  return url.replace(/_[a-z](\.[a-z0-9]+)$/i, "_b$1");
+}
+
+function getFlickrPhotoId(url: string) {
+  return url.match(/\/photos\/[^/]+\/(\d+)/i)?.[1] || "";
 }
 
 const PRODUCT_IMAGE_SOURCE_ORIGIN =

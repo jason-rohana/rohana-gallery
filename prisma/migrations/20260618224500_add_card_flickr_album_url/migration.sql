@@ -1,0 +1,1 @@
+ALTER TABLE "GalleryCard" ADD COLUMN "flickrAlbumUrl" TEXT NOT NULL DEFAULT '';

@@ -61,10 +61,11 @@ model GalleryCard {
   title       String
   subtitle    String         @default("")
   description String         @default("")
-  color       String         @default("")
-  position    Int            @default(0)
-  tab         GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
-  photos      GalleryPhoto[]
+  color          String         @default("")
+  flickrAlbumUrl String         @default("")
+  position       Int            @default(0)
+  tab            GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  photos         GalleryPhoto[]
 
   @@index([tabId])
 }
