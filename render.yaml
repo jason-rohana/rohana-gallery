@@ -11,6 +11,8 @@ services:
         value: file:/tmp/prod.sqlite
       - key: SCOPES
         value: read_files,write_files,write_app_proxy
+      - key: SHOPIFY_APP_URL
+        value: https://car-gallery-4thd.onrender.com
       - key: SHOPIFY_API_KEY
         sync: false
       - key: SHOPIFY_API_SECRET

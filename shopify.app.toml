@@ -2,7 +2,7 @@
 
 client_id = "c6dc9be46a5cece104c1e97e199438b4"
 name = "car-gallery"
-application_url = "https://example.com"
+application_url = "https://car-gallery-4thd.onrender.com"
 embedded = true
 
 [build]
@@ -25,9 +25,9 @@ api_version = "2026-07"
 scopes = "read_files,write_files,write_app_proxy"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://car-gallery-4thd.onrender.com/auth/callback" ]
 
 [app_proxy]
-url = "/gallery-proxy"
+url = "https://car-gallery-4thd.onrender.com/gallery-proxy"
 subpath = "car-gallery"
 prefix = "apps"
