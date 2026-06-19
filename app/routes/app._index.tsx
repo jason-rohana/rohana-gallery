@@ -24,6 +24,22 @@ type FlickrAlbum = {
   coverUrl: string;
 };
 
+type AlbumMetadata = {
+  category: string;
+  vehicleBrand: string;
+  vehicleModel: string;
+  wheelLabel: string;
+  wheelType: string;
+};
+
+type AutoRepairCard = {
+  category: string;
+  vehicleBrand: string;
+  vehicleModel: string;
+  subtitle: string;
+  wheelType: string;
+};
+
 const FLICKR_ALBUMS_URL =
   process.env.FLICKR_ALBUMS_URL ||
   "https://www.flickr.com/photos/rohanawheels/albums/";
@@ -184,12 +200,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const existingCard = existingByAlbumId.get(album.id);
 
         if (existingCard) {
+          const inferred = inferAlbumMetadata(album.title);
+
           await prisma.galleryCard.update({
             where: { id: existingCard.id },
             data: {
               flickrAlbumId: album.id,
               flickrAlbumUrl: album.url,
               flickrCoverUrl: album.coverUrl,
+              ...getAutoRepairAlbumData(existingCard, inferred),
             },
           });
           continue;
@@ -242,6 +261,74 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return redirect(getAppPath(request, card.tab.galleryId));
     }
 
+    if (intent === "bulk_update_albums") {
+      const gallery = await findGalleryForShop(
+        getString(formData, "galleryId"),
+        session.shop,
+      );
+      const cardIds = formData
+        .getAll("cardId")
+        .map((value) => (typeof value === "string" ? value : ""))
+        .filter(Boolean);
+
+      if (!cardIds.length) {
+        throw new Error("No albums were submitted.");
+      }
+
+      const cards = await prisma.galleryCard.findMany({
+        where: {
+          id: { in: cardIds },
+          tab: {
+            gallery: {
+              id: gallery.id,
+              shop: session.shop,
+            },
+          },
+        },
+        include: {
+          tab: true,
+        },
+      });
+      const cardsById = new Map(cards.map((card) => [card.id, card]));
+
+      if (cards.length !== cardIds.length) {
+        throw new Error("One or more albums could not be found.");
+      }
+
+      await prisma.$transaction(
+        cardIds.map((cardId) => {
+          const card = cardsById.get(cardId);
+
+          if (!card) {
+            throw new Error("Album not found.");
+          }
+
+          return prisma.galleryCard.update({
+            where: { id: card.id },
+            data: {
+              title: getString(formData, getFieldName(cardId, "title"), card.title),
+              subtitle: getString(formData, getFieldName(cardId, "subtitle")),
+              category: normalizeCategory(
+                getString(formData, getFieldName(cardId, "category")),
+              ),
+              isActive: formData.get(getFieldName(cardId, "isActive")) === "on",
+              vehicleBrand: getString(formData, getFieldName(cardId, "vehicleBrand")),
+              vehicleModel: getString(formData, getFieldName(cardId, "vehicleModel")),
+              wheelType: normalizeWheelType(
+                getString(formData, getFieldName(cardId, "wheelType")),
+              ),
+              wheelSpecification: getString(
+                formData,
+                getFieldName(cardId, "wheelSpecification"),
+              ),
+            },
+          });
+        }),
+      );
+
+      return redirect(getAppPath(request, gallery.id));
+    }
+
     throw new Error("Unknown action.");
   } catch (error) {
     return {
@@ -271,6 +358,7 @@ export default function Index() {
   return (
     <s-page heading="Car Gallery">
       <style>{styles}</style>
+      <div className="cg-shell">
 
       {actionData && "error" in actionData && actionData.error ? (
         <s-banner tone="critical">{actionData.error}</s-banner>
@@ -353,101 +441,132 @@ export default function Index() {
 
       <s-section heading="Album curation">
         {cards.length ? (
-          <div className="cg-albums">
-            {cards.map((card) => (
-              <article
-                className={`cg-album ${card.isActive ? "" : "is-inactive"}`}
-                key={card.id}
-              >
-                <a
-                  className="cg-cover"
-                  href={card.flickrAlbumUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {card.flickrCoverUrl ? (
-                    <img src={card.flickrCoverUrl} alt={card.title} />
-                  ) : (
-                    <span>{card.title}</span>
-                  )}
-                </a>
+          <AdminForm method="post" className="cg-form cg-bulk-form">
+            <input type="hidden" name="_action" value="bulk_update_albums" />
+            <input type="hidden" name="galleryId" value={gallery.id} />
 
-                <AdminForm method="post" className="cg-form cg-album-form">
-                  <input type="hidden" name="_action" value="update_album" />
+            <div className="cg-bulk-header">
+              <p className="cg-muted">
+                Edit as many albums as you want, then save everything together.
+                Brand tabs on the storefront are built from the active car albums.
+              </p>
+              <button type="submit">Save all album changes</button>
+            </div>
+
+            <div className="cg-albums">
+              {cards.map((card) => (
+                <article
+                  className={`cg-album ${card.isActive ? "" : "is-inactive"}`}
+                  key={card.id}
+                >
                   <input type="hidden" name="cardId" value={card.id} />
 
-                  <div className="cg-album-topline">
-                    <label className="cg-check">
-                      <input
-                        type="checkbox"
-                        name="isActive"
-                        defaultChecked={card.isActive}
-                      />
-                      <span>Active</span>
-                    </label>
+                  <a
+                    className="cg-cover"
+                    href={card.flickrAlbumUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {card.flickrCoverUrl ? (
+                      <img src={card.flickrCoverUrl} alt={card.title} />
+                    ) : (
+                      <span>{card.title}</span>
+                    )}
+                  </a>
 
-                    <label>
-                      <span>Category</span>
-                      <select name="category" defaultValue={card.category || "car"}>
-                        <option value="car">Car</option>
-                        <option value="wheel">Wheel</option>
-                      </select>
-                    </label>
+                  <div className="cg-album-fields">
+                    <div className="cg-album-primary">
+                      <label className="cg-title-field">
+                        <span>Album title</span>
+                        <input
+                          name={getFieldName(card.id, "title")}
+                          defaultValue={card.title}
+                        />
+                      </label>
 
-                    <label>
-                      <span>Wheel type</span>
-                      <select name="wheelType" defaultValue={card.wheelType}>
-                        <option value="">Not set</option>
-                        <option value="cross-forged">Cross-forged</option>
-                        <option value="forged">Forged</option>
-                      </select>
-                    </label>
+                      <label>
+                        <span>Wheel model / finish</span>
+                        <input
+                          name={getFieldName(card.id, "subtitle")}
+                          defaultValue={card.subtitle}
+                          placeholder="RFX11 Brushed Titanium"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="cg-album-grid">
+                      <label className="cg-check">
+                        <input
+                          type="checkbox"
+                          name={getFieldName(card.id, "isActive")}
+                          defaultChecked={card.isActive}
+                        />
+                        <span>Active</span>
+                      </label>
+
+                      <label>
+                        <span>Category</span>
+                        <select
+                          name={getFieldName(card.id, "category")}
+                          defaultValue={card.category || "car"}
+                        >
+                          <option value="car">Car</option>
+                          <option value="wheel">Wheel</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>Vehicle brand</span>
+                        <input
+                          name={getFieldName(card.id, "vehicleBrand")}
+                          defaultValue={card.vehicleBrand}
+                        />
+                      </label>
+
+                      <label>
+                        <span>Vehicle model</span>
+                        <input
+                          name={getFieldName(card.id, "vehicleModel")}
+                          defaultValue={card.vehicleModel}
+                        />
+                      </label>
+
+                      <label>
+                        <span>Wheel type</span>
+                        <select
+                          name={getFieldName(card.id, "wheelType")}
+                          defaultValue={card.wheelType}
+                        >
+                          <option value="">Not set</option>
+                          <option value="cross-forged">Cross-forged</option>
+                          <option value="forged">Forged</option>
+                        </select>
+                      </label>
+
+                      <label className="cg-spec-field">
+                        <span>Wheel specification</span>
+                        <textarea
+                          name={getFieldName(card.id, "wheelSpecification")}
+                          defaultValue={card.wheelSpecification}
+                          rows={2}
+                          placeholder="Front: 22x10.5 Rear: 22x11.5"
+                        />
+                      </label>
+                    </div>
                   </div>
+                </article>
+              ))}
+            </div>
 
-                  <label>
-                    <span>Album title</span>
-                    <input name="title" defaultValue={card.title} />
-                  </label>
-
-                  <div className="cg-two-fields">
-                    <label>
-                      <span>Vehicle brand</span>
-                      <input name="vehicleBrand" defaultValue={card.vehicleBrand} />
-                    </label>
-                    <label>
-                      <span>Vehicle model</span>
-                      <input name="vehicleModel" defaultValue={card.vehicleModel} />
-                    </label>
-                  </div>
-
-                  <label>
-                    <span>Wheel model / finish</span>
-                    <input
-                      name="subtitle"
-                      defaultValue={card.subtitle}
-                      placeholder="RFX11 Brushed Titanium"
-                    />
-                  </label>
-
-                  <label>
-                    <span>Wheel specification</span>
-                    <textarea
-                      name="wheelSpecification"
-                      defaultValue={card.wheelSpecification}
-                      rows={2}
-                      placeholder="Front: 22x10.5 Rear: 22x11.5"
-                    />
-                  </label>
-
-                  <button type="submit">Save album</button>
-                </AdminForm>
-              </article>
-            ))}
-          </div>
+            <div className="cg-bulk-footer">
+              <button type="submit">Save all album changes</button>
+            </div>
+          </AdminForm>
         ) : (
           <p className="cg-muted">Sync Flickr albums to start curating.</p>
         )}
       </s-section>
+      </div>
     </s-page>
   );
 }
@@ -579,70 +698,134 @@ function parseFlickrAlbumsPage(html: string) {
   return albums;
 }
 
-function inferAlbumMetadata(title: string) {
+function inferAlbumMetadata(title: string): AlbumMetadata {
   const [vehiclePart, ...wheelParts] = title.split(/\s+-\s+/);
   const vehicleLabel = vehiclePart.trim();
   const wheelLabel = wheelParts.join(" - ").trim();
   const startsWithWheel = Boolean(findWheelModelCode(vehicleLabel));
   const category = startsWithWheel ? "wheel" : "car";
-  const vehicleBrand = category === "car" ? detectVehicleBrand(vehicleLabel) : "";
-  const vehicleModel =
+  const vehicleDetails =
     category === "car"
-      ? vehicleLabel.slice(vehicleBrand.length).trim() || vehicleLabel
-      : "";
+      ? detectVehicleDetails(vehicleLabel)
+      : { brand: "", model: "" };
 
   return {
     category,
-    vehicleBrand,
-    vehicleModel,
+    vehicleBrand: vehicleDetails.brand,
+    vehicleModel: vehicleDetails.model,
     wheelLabel,
     wheelType: inferWheelType(wheelLabel || title),
   };
 }
 
-function detectVehicleBrand(vehicleLabel: string) {
-  const normalized = vehicleLabel.trim();
+function detectVehicleDetails(vehicleLabel: string) {
+  const withoutYear = stripLeadingVehicleYear(vehicleLabel);
+  const normalized = withoutYear.trim();
   const brands = [
-    "Mercedes-Benz",
-    "Mercedes Benz",
-    "Land Rover",
-    "Rolls Royce",
-    "Rolls-Royce",
-    "Aston Martin",
-    "Alfa Romeo",
-    "Chevrolet",
-    "Lamborghini",
-    "Volkswagen",
-    "McLaren",
-    "Porsche",
-    "Ferrari",
-    "Genesis",
-    "Cadillac",
-    "Infiniti",
-    "Maserati",
-    "Bentley",
-    "Toyota",
-    "Nissan",
-    "Lexus",
-    "Honda",
-    "Dodge",
-    "Acura",
-    "Audi",
-    "Ford",
-    "Jeep",
-    "Subaru",
-    "Tesla",
-    "Volvo",
-    "BMW",
-    "Kia",
-  ].sort((a, b) => b.length - a.length);
-  const match = brands.find((brand) =>
-    normalized.toLowerCase().startsWith(brand.toLowerCase()),
+    ["Mercedes-Benz", "Mercedes-Benz"],
+    ["Mercedes Benz", "Mercedes-Benz"],
+    ["Mercedes", "Mercedes-Benz"],
+    ["Land Rover", "Land Rover"],
+    ["Range Rover", "Land Rover"],
+    ["Rolls Royce", "Rolls-Royce"],
+    ["Rolls-Royce", "Rolls-Royce"],
+    ["Aston Martin", "Aston Martin"],
+    ["Alfa Romeo", "Alfa Romeo"],
+    ["Chevrolet", "Chevrolet"],
+    ["Lamborghini", "Lamborghini"],
+    ["Volkswagen", "Volkswagen"],
+    ["McLaren", "McLaren"],
+    ["Porsche", "Porsche"],
+    ["Ferrari", "Ferrari"],
+    ["Genesis", "Genesis"],
+    ["Cadillac", "Cadillac"],
+    ["Infiniti", "Infiniti"],
+    ["Maserati", "Maserati"],
+    ["Bentley", "Bentley"],
+    ["Toyota", "Toyota"],
+    ["Nissan", "Nissan"],
+    ["Lexus", "Lexus"],
+    ["Honda", "Honda"],
+    ["Dodge", "Dodge"],
+    ["Acura", "Acura"],
+    ["Audi", "Audi"],
+    ["Ford", "Ford"],
+    ["Jeep", "Jeep"],
+    ["Subaru", "Subaru"],
+    ["Tesla", "Tesla"],
+    ["Volvo", "Volvo"],
+    ["BMW", "BMW"],
+    ["Kia", "Kia"],
+  ]
+    .map(([label, brand]) => ({ label, brand }))
+    .sort((a, b) => b.label.length - a.label.length);
+  const match = brands.find((brandEntry) =>
+    normalized.toLowerCase().startsWith(brandEntry.label.toLowerCase()),
   );
 
-  if (match) return match === "Mercedes Benz" ? "Mercedes-Benz" : match;
+  if (match) {
+    return {
+      brand: match.brand,
+      model: normalized.slice(match.label.length).trim() || normalized,
+    };
+  }
 
-  return normalized.split(/\s+/)[0] || "";
+  return {
+    brand: normalized.split(/\s+/)[0] || "",
+    model: normalized.split(/\s+/).slice(1).join(" ").trim() || normalized,
+  };
+}
+
+function stripLeadingVehicleYear(value: string) {
+  return value.replace(/^(?:19|20)\d{2}\s+/, "").trim();
+}
+
+function getAutoRepairAlbumData(
+  card: AutoRepairCard,
+  inferred: AlbumMetadata,
+) {
+  const data: Partial<AutoRepairCard> = {};
+
+  if (shouldRepairCategory(card.category)) {
+    data.category = inferred.category;
+  }
+
+  if (shouldRepairVehicleBrand(card.vehicleBrand)) {
+    data.vehicleBrand = inferred.vehicleBrand;
+    data.vehicleModel = inferred.vehicleModel;
+  } else if (shouldRepairVehicleModel(card.vehicleBrand, card.vehicleModel)) {
+    data.vehicleModel = inferred.vehicleModel;
+  }
+
+  if (!card.subtitle.trim() && inferred.wheelLabel) {
+    data.subtitle = inferred.wheelLabel;
+  }
+
+  if (!card.wheelType.trim() && inferred.wheelType) {
+    data.wheelType = inferred.wheelType;
+  }
+
+  return data;
+}
+
+function shouldRepairCategory(category: string) {
+  return !category.trim();
+}
+
+function shouldRepairVehicleBrand(vehicleBrand: string) {
+  return !vehicleBrand.trim() || /^(?:19|20)\d{2}$/.test(vehicleBrand.trim());
+}
+
+function shouldRepairVehicleModel(vehicleBrand: string, vehicleModel: string) {
+  const normalizedBrand = vehicleBrand.trim().toLowerCase();
+  const normalizedModel = vehicleModel.trim().toLowerCase();
+
+  if (!normalizedBrand || !normalizedModel) return false;
+
+  return (
+    normalizedModel.startsWith(`${normalizedBrand} `) ||
+    /^(?:19|20)\d{2}\s+/.test(normalizedModel)
+  );
 }
 
 const WHEEL_PREFIXES = ["RFX", "RFC", "RFG", "RLB", "RPM", "RFL", "RC"];
@@ -707,6 +890,10 @@ function getString(formData: FormData, key: string, fallback = "") {
   return trimmed || fallback;
 }
 
+function getFieldName(cardId: string, field: string) {
+  return `album:${cardId}:${field}`;
+}
+
 function getActionErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
@@ -760,6 +947,14 @@ function getAppIndexActionPath(search: string) {
 }
 
 const styles = `
+  .cg-shell {
+    width: min(1760px, calc(100vw - 40px));
+    max-width: 100%;
+    margin: 0 auto;
+    display: grid;
+    gap: 16px;
+  }
+
   .cg-toolbar,
   .cg-setup,
   .cg-import,
@@ -859,18 +1054,47 @@ const styles = `
     color: inherit;
   }
 
-  .cg-albums {
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  .cg-bulk-form {
+    display: grid;
+    gap: 16px;
   }
 
-  .cg-album {
+  .cg-bulk-header,
+  .cg-bulk-footer {
     display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: center;
     border: 1px solid #dedede;
     border-radius: 8px;
     background: #fff;
     padding: 14px;
+  }
+
+  .cg-bulk-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .cg-bulk-header p {
+    margin: 0;
+  }
+
+  .cg-albums {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .cg-album {
+    display: grid;
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 18px;
+    align-items: stretch;
+    border: 1px solid #dedede;
+    border-radius: 8px;
+    background: #fff;
+    padding: 16px;
   }
 
   .cg-album.is-inactive {
@@ -878,7 +1102,7 @@ const styles = `
   }
 
   .cg-cover {
-    min-height: 150px;
+    min-height: 240px;
     display: grid;
     place-items: center;
     overflow: hidden;
@@ -897,20 +1121,28 @@ const styles = `
     object-fit: cover;
   }
 
-  .cg-album-form {
+  .cg-album-fields {
     display: grid;
-    gap: 10px;
+    gap: 12px;
+    align-content: start;
   }
 
-  .cg-album-topline,
-  .cg-two-fields {
+  .cg-album-primary {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 0.9fr);
+    gap: 12px;
   }
 
-  .cg-album-topline {
-    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  .cg-album-grid {
+    display: grid;
+    grid-template-columns:
+      minmax(90px, 0.45fr)
+      minmax(140px, 0.7fr)
+      minmax(180px, 0.95fr)
+      minmax(220px, 1.1fr)
+      minmax(160px, 0.85fr)
+      minmax(280px, 1.3fr);
+    gap: 12px;
     align-items: end;
   }
 
@@ -918,22 +1150,36 @@ const styles = `
     align-items: center;
     grid-template-columns: auto auto;
     justify-content: start;
-    padding-bottom: 9px;
+    padding-bottom: 10px;
   }
 
   .cg-check input {
     width: auto;
   }
 
+  .cg-spec-field textarea {
+    min-height: 38px;
+  }
+
   @media (max-width: 900px) {
+    .cg-shell {
+      width: min(100%, calc(100vw - 24px));
+    }
+
     .cg-inline-form,
     .cg-copy-grid,
     .cg-import,
+    .cg-bulk-header,
+    .cg-bulk-footer,
     .cg-albums,
     .cg-album,
-    .cg-album-topline,
-    .cg-two-fields {
+    .cg-album-primary,
+    .cg-album-grid {
       grid-template-columns: 1fr;
+    }
+
+    .cg-cover {
+      min-height: 220px;
     }
   }
 `;
