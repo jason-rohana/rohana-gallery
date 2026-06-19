@@ -1088,7 +1088,7 @@ const styles = `
 
   .cg-album {
     display: grid;
-    grid-template-columns: 230px minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     gap: 18px;
     align-items: stretch;
     border: 1px solid #dedede;
@@ -1129,21 +1129,17 @@ const styles = `
 
   .cg-album-primary {
     display: grid;
-    grid-template-columns: minmax(360px, 1.35fr) minmax(280px, 0.9fr);
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
     gap: 12px;
+    min-width: 0;
   }
 
   .cg-album-grid {
     display: grid;
-    grid-template-columns:
-      minmax(90px, 0.45fr)
-      minmax(140px, 0.7fr)
-      minmax(180px, 0.95fr)
-      minmax(220px, 1.1fr)
-      minmax(160px, 0.85fr)
-      minmax(280px, 1.3fr);
+    grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
     gap: 12px;
     align-items: end;
+    min-width: 0;
   }
 
   .cg-check {
@@ -1159,6 +1155,21 @@ const styles = `
 
   .cg-spec-field textarea {
     min-height: 38px;
+  }
+
+  .cg-title-field,
+  .cg-spec-field {
+    grid-column: 1 / -1;
+  }
+
+  @media (min-width: 1280px) {
+    .cg-title-field {
+      grid-column: span 2;
+    }
+
+    .cg-spec-field {
+      grid-column: span 2;
+    }
   }
 
   @media (max-width: 900px) {
