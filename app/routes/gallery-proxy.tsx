@@ -14,6 +14,22 @@ type StoredGalleryPhoto = {
   alt: string;
 };
 
+type GalleryCardForResponse = {
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  color: string;
+  category: string;
+  vehicleBrand: string;
+  vehicleModel: string;
+  wheelType: string;
+  wheelSpecification: string;
+  flickrAlbumUrl: string;
+  flickrCoverUrl: string;
+  photos: StoredGalleryPhoto[];
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.public.appProxy(request);
 
@@ -64,52 +80,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ]),
   );
 
+  const cards = gallery.tabs
+    .flatMap((tab) => tab.cards)
+    .filter((card) => card.isActive);
+  const preparedCards = await Promise.all(
+    cards.map((card) => buildCardResponse(card, wheelModelImageByCode)),
+  );
+  const tabs = buildStorefrontTabs(preparedCards);
+
   return jsonResponse({
     id: gallery.id,
     name: gallery.name,
-    tabs: await Promise.all(
-      gallery.tabs.map(async (tab) => ({
-        id: tab.id,
-        title: tab.title,
-        cards: await Promise.all(
-          tab.cards.map(async (card) => {
-            const wheelModelCode = findWheelModelCode(
-              card.subtitle,
-              card.title,
-              card.description,
-            );
-            const wheelModelImage = wheelModelCode
-              ? wheelModelImageByCode.get(wheelModelCode)
-              : null;
-            const productImageUrl =
-              wheelModelCode && !wheelModelImage?.imageUrl
-                ? await getProductFirstImageUrl(wheelModelCode)
-                : "";
-            const photos = await getCardPhotos(
-              card.flickrAlbumUrl,
-              card.photos,
-            );
-
-            return {
-              id: card.id,
-              title: card.title,
-              subtitle: card.subtitle,
-              description: card.description,
-              color: card.color,
-              wheelModel: wheelModelCode
-                ? {
-                    code: wheelModelCode,
-                    imageUrl: wheelModelImage?.imageUrl || productImageUrl,
-                    alt: wheelModelImage?.alt || wheelModelCode,
-                    productUrl: getProductUrl(wheelModelCode),
-                  }
-                : null,
-              photos,
-            };
-          }),
-        ),
-      })),
-    ),
+    tabs,
   });
 };
 
@@ -137,8 +119,127 @@ function findWheelModelCode(...values: string[]) {
   return "";
 }
 
+async function buildCardResponse(
+  card: GalleryCardForResponse,
+  wheelModelImageByCode: Map<string, { imageUrl: string; alt: string }>,
+) {
+  const wheelModelCode = findWheelModelCode(
+    card.subtitle,
+    card.title,
+    card.description,
+    card.wheelSpecification,
+  );
+  const wheelModelImage = wheelModelCode
+    ? wheelModelImageByCode.get(wheelModelCode)
+    : null;
+  const productImageUrl =
+    wheelModelCode && !wheelModelImage?.imageUrl
+      ? await getProductFirstImageUrl(wheelModelCode)
+      : "";
+  const photos = await getCardPhotos(
+    card.flickrAlbumUrl,
+    card.flickrCoverUrl,
+    card.photos,
+  );
+
+  return {
+    id: card.id,
+    title: getDisplayTitle(card),
+    subtitle: getDisplaySubtitle(card),
+    description: card.wheelSpecification || card.description,
+    color: card.color,
+    category: card.category,
+    vehicleBrand: card.vehicleBrand,
+    vehicleModel: card.vehicleModel,
+    wheelType: card.wheelType,
+    wheelModel: wheelModelCode
+      ? {
+          code: wheelModelCode,
+          imageUrl: wheelModelImage?.imageUrl || productImageUrl,
+          alt: wheelModelImage?.alt || wheelModelCode,
+          productUrl: getProductUrl(wheelModelCode),
+        }
+      : null,
+    photos,
+  };
+}
+
+type PreparedGalleryCard = Awaited<ReturnType<typeof buildCardResponse>>;
+
+function buildStorefrontTabs(cards: PreparedGalleryCard[]) {
+  const carCards = cards.filter((card) => card.category !== "wheel");
+  const wheelCards = cards.filter((card) => card.category === "wheel");
+  const brandNames = Array.from(
+    new Set(carCards.map((card) => card.vehicleBrand.trim() || "Other")),
+  ).sort((a, b) => a.localeCompare(b));
+  const brandTabs = brandNames.map((brandName, index) => ({
+    id: `brand-${index}-${slugify(brandName)}`,
+    title: brandName,
+    cards: carCards
+      .filter((card) => (card.vehicleBrand.trim() || "Other") === brandName)
+      .sort(sortPreparedCards),
+  }));
+
+  if (!wheelCards.length) {
+    return brandTabs;
+  }
+
+  return [
+    ...brandTabs,
+    {
+      id: "wheel-albums",
+      title: "Wheels",
+      cards: wheelCards.sort(sortPreparedCards),
+    },
+  ];
+}
+
+function sortPreparedCards(a: PreparedGalleryCard, b: PreparedGalleryCard) {
+  return getCardSortKey(a).localeCompare(getCardSortKey(b));
+}
+
+function getCardSortKey(card: PreparedGalleryCard) {
+  return (card.vehicleModel || card.title).toLowerCase();
+}
+
+function getDisplayTitle(card: GalleryCardForResponse) {
+  if (card.category !== "wheel") {
+    const vehicleTitle = [card.vehicleBrand, card.vehicleModel]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(" ");
+
+    if (vehicleTitle) return vehicleTitle;
+  }
+
+  return card.title;
+}
+
+function getDisplaySubtitle(card: GalleryCardForResponse) {
+  return [getWheelTypeLabel(card.wheelType), card.subtitle]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function getWheelTypeLabel(wheelType: string) {
+  if (wheelType === "cross-forged") return "Cross-forged";
+  if (wheelType === "forged") return "Forged";
+  return "";
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "tab"
+  );
+}
+
 async function getCardPhotos(
   flickrAlbumUrl: string,
+  flickrCoverUrl: string,
   storedPhotos: StoredGalleryPhoto[],
 ) {
   const savedPhotos = storedPhotos.map((photo) => ({
@@ -146,16 +247,26 @@ async function getCardPhotos(
     url: photo.url,
     alt: photo.alt,
   }));
+  const coverPhoto = flickrCoverUrl
+    ? [
+        {
+          id: `flickr-cover-${getFlickrAlbumParts(flickrAlbumUrl)?.albumId || "album"}`,
+          url: flickrCoverUrl,
+          alt: "Flickr gallery cover image",
+        },
+      ]
+    : [];
+  const fallbackPhotos = savedPhotos.length ? savedPhotos : coverPhoto;
 
   if (!flickrAlbumUrl.trim()) {
-    return savedPhotos;
+    return fallbackPhotos;
   }
 
   try {
     const flickrPhotos = await getFlickrAlbumPhotos(flickrAlbumUrl);
-    return flickrPhotos.length ? flickrPhotos : savedPhotos;
+    return flickrPhotos.length ? flickrPhotos : fallbackPhotos;
   } catch (error) {
-    return savedPhotos;
+    return fallbackPhotos;
   }
 }
 

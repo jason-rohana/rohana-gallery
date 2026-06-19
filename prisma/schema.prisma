@@ -56,16 +56,24 @@ model GalleryTab {
 }
 
 model GalleryCard {
-  id          String         @id @default(cuid())
-  tabId       String
-  title       String
-  subtitle    String         @default("")
-  description String         @default("")
-  color          String         @default("")
-  flickrAlbumUrl String         @default("")
-  position       Int            @default(0)
-  tab            GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
-  photos         GalleryPhoto[]
+  id                 String         @id @default(cuid())
+  tabId              String
+  title              String
+  subtitle           String         @default("")
+  description        String         @default("")
+  color              String         @default("")
+  category           String         @default("car")
+  isActive           Boolean        @default(true)
+  vehicleBrand       String         @default("")
+  vehicleModel       String         @default("")
+  wheelType          String         @default("")
+  wheelSpecification String         @default("")
+  flickrAlbumId      String         @default("")
+  flickrAlbumUrl     String         @default("")
+  flickrCoverUrl     String         @default("")
+  position           Int            @default(0)
+  tab                GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  photos             GalleryPhoto[]
 
   @@index([tabId])
 }
