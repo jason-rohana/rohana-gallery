@@ -384,6 +384,24 @@ export default function Index() {
     filters,
   );
   const wheelsThemeGalleryId = `${gallery.id}::wheels`;
+  const selectedBrandSummary = brandSummaries.find(
+    (brand) => brand.slug === filters.brand,
+  );
+  const currentThemeBlock =
+    filters.category === "wheel"
+      ? {
+          label: "Wheels",
+          galleryId: wheelsThemeGalleryId,
+        }
+      : selectedBrandSummary
+        ? {
+            label: selectedBrandSummary.name,
+            galleryId: selectedBrandSummary.themeGalleryId,
+          }
+        : {
+            label: "All makes",
+            galleryId: gallery.id,
+          };
 
   useEffect(() => {
     setFilters(getAdminFilters(location.search));
@@ -456,30 +474,6 @@ export default function Index() {
               <span>Theme endpoint</span>
               <input readOnly value={proxyPath} />
             </label>
-          </div>
-
-          <div className="cg-brand-id-library">
-            <div>
-              <h3>Make-specific gallery IDs</h3>
-              <p className="cg-muted">
-                Use these IDs when a page should only show one make, like BMW.
-                The endpoint stays {proxyPath}.
-              </p>
-            </div>
-            <div className="cg-brand-id-grid">
-              {brandSummaries.map((brand) => (
-                <label key={brand.slug}>
-                  <span>{brand.name} ({brand.activeCount}/{brand.totalCount} active)</span>
-                  <input readOnly value={brand.themeGalleryId} />
-                </label>
-              ))}
-              {stats.wheels ? (
-                <label>
-                  <span>Wheels ({stats.wheels})</span>
-                  <input readOnly value={wheelsThemeGalleryId} />
-                </label>
-              ) : null}
-            </div>
           </div>
         </div>
       </s-section>
@@ -612,6 +606,23 @@ export default function Index() {
               >
                 Wheels ({stats.wheels})
               </button>
+            </div>
+
+            <div className="cg-current-theme-block">
+              <div>
+                <h3>Theme block for {currentThemeBlock.label}</h3>
+                <p className="cg-muted">
+                  Select a make or Wheels above to see only that gallery ID.
+                </p>
+              </div>
+              <label>
+                <span>Gallery ID</span>
+                <input readOnly value={currentThemeBlock.galleryId} />
+              </label>
+              <label>
+                <span>Theme endpoint</span>
+                <input readOnly value={proxyPath} />
+              </label>
             </div>
 
             <p className="cg-muted">
@@ -1418,14 +1429,16 @@ const styles = `
   }
 
   .cg-form label,
-  .cg-copy-grid label {
+  .cg-copy-grid label,
+  .cg-current-theme-block label {
     display: grid;
     gap: 6px;
     min-width: 0;
   }
 
   .cg-form span,
-  .cg-copy-grid span {
+  .cg-copy-grid span,
+  .cg-current-theme-block span {
     color: #616161;
     font-size: 12px;
     font-weight: 700;
@@ -1434,7 +1447,8 @@ const styles = `
   .cg-form input,
   .cg-form select,
   .cg-form textarea,
-  .cg-copy-grid input {
+  .cg-copy-grid input,
+  .cg-current-theme-block input {
     width: 100%;
     border: 1px solid #c9c9c9;
     border-radius: 6px;
@@ -1500,28 +1514,6 @@ const styles = `
     color: inherit;
   }
 
-  .cg-brand-id-library {
-    display: grid;
-    gap: 12px;
-    border-top: 1px solid #dedede;
-    padding-top: 16px;
-  }
-
-  .cg-brand-id-library h3 {
-    margin: 0 0 4px;
-    font-size: 14px;
-  }
-
-  .cg-brand-id-library p {
-    margin: 0;
-  }
-
-  .cg-brand-id-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 10px;
-  }
-
   .cg-filter-panel {
     display: grid;
     gap: 14px;
@@ -1533,6 +1525,20 @@ const styles = `
 
   .cg-filter-panel p {
     margin: 0;
+  }
+
+  .cg-current-theme-block {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) minmax(260px, 1fr) minmax(180px, 0.7fr);
+    align-items: end;
+    gap: 12px;
+    border-top: 1px solid #dedede;
+    padding-top: 14px;
+  }
+
+  .cg-current-theme-block h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
   }
 
   .cg-filter-form {
@@ -1692,6 +1698,7 @@ const styles = `
     .cg-copy-grid,
     .cg-import,
     .cg-filter-form,
+    .cg-current-theme-block,
     .cg-bulk-header,
     .cg-bulk-footer,
     .cg-albums,
