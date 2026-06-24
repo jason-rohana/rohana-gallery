@@ -10,7 +10,7 @@ import {
   useLoaderData,
   useLocation,
 } from "react-router";
-import type { ComponentProps } from "react";
+import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -273,16 +273,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       await prisma.galleryCard.update({
         where: { id: card.id },
-        data: {
-          title: getString(formData, "title", card.title),
-          subtitle: getString(formData, "subtitle"),
-          category: normalizeCategory(getString(formData, "category")),
-          isActive: formData.get("isActive") === "on",
-          vehicleBrand: getString(formData, "vehicleBrand"),
-          vehicleModel: getString(formData, "vehicleModel"),
-          wheelType: normalizeWheelType(getString(formData, "wheelType")),
-          wheelSpecification: getString(formData, "wheelSpecification"),
-        },
+        data: getAlbumUpdateData(formData, card, (field) => field),
       });
 
       return redirect(getActionRedirectPath(request, formData, card.tab.galleryId));
@@ -341,23 +332,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           return prisma.galleryCard.update({
             where: { id: card.id },
-            data: {
-              title: getString(formData, getFieldName(cardId, "title"), card.title),
-              subtitle: getString(formData, getFieldName(cardId, "subtitle")),
-              category: normalizeCategory(
-                getString(formData, getFieldName(cardId, "category")),
-              ),
-              isActive: formData.get(getFieldName(cardId, "isActive")) === "on",
-              vehicleBrand: getString(formData, getFieldName(cardId, "vehicleBrand")),
-              vehicleModel: getString(formData, getFieldName(cardId, "vehicleModel")),
-              wheelType: normalizeWheelType(
-                getString(formData, getFieldName(cardId, "wheelType")),
-              ),
-              wheelSpecification: getString(
-                formData,
-                getFieldName(cardId, "wheelSpecification"),
-              ),
-            },
+            data: getAlbumUpdateData(formData, card, (field) =>
+              getFieldName(cardId, field),
+            ),
           });
         }),
       );
@@ -379,26 +356,6 @@ function AdminForm({ action, ...props }: AdminFormProps) {
   return <Form {...props} action={action ?? getAppIndexActionPath(location.search)} />;
 }
 
-function ShopifyContextInputs({
-  search,
-  galleryId,
-}: {
-  search: string;
-  galleryId: string;
-}) {
-  const params = new URLSearchParams(search);
-
-  return (
-    <>
-      {SHOPIFY_CONTEXT_PARAMS.map((key) => {
-        const value = params.get(key);
-        return value ? <input key={key} type="hidden" name={key} value={value} /> : null;
-      })}
-      <input type="hidden" name="gallery" value={galleryId} />
-    </>
-  );
-}
-
 export default function Index() {
   const {
     galleries,
@@ -411,9 +368,36 @@ export default function Index() {
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const location = useLocation();
-  const filters = getAdminFilters(location.search);
-  const filteredCards = filterAdminCards(cards, filters);
+  const [filters, setFilters] = useState(() => getAdminFilters(location.search));
+  const brandSlugKey = brandSummaries.map((brand) => brand.slug).join("|");
+  const availableBrandSlugs = useMemo(
+    () => new Set(brandSummaries.map((brand) => brand.slug)),
+    [brandSlugKey, brandSummaries],
+  );
+  const filteredCards = useMemo(
+    () => filterAdminCards(cards, filters),
+    [cards, filters],
+  );
+  const filterReturnSearch = getSearchWithFilters(
+    location.search,
+    gallery.id,
+    filters,
+  );
   const wheelsThemeGalleryId = `${gallery.id}::wheels`;
+
+  useEffect(() => {
+    setFilters(getAdminFilters(location.search));
+  }, [location.search]);
+
+  useEffect(() => {
+    setFilters((current) => {
+      if (!current.brand || availableBrandSlugs.has(current.brand)) {
+        return current;
+      }
+
+      return { ...current, brand: "" };
+    });
+  }, [availableBrandSlugs]);
 
   return (
     <s-page heading="Car Gallery">
@@ -519,13 +503,13 @@ export default function Index() {
             <AdminForm method="post">
               <input type="hidden" name="_action" value="refresh_flickr_albums" />
               <input type="hidden" name="galleryId" value={gallery.id} />
-              <input type="hidden" name="returnSearch" value={location.search} />
+              <input type="hidden" name="returnSearch" value={filterReturnSearch} />
               <button type="submit">Add new Flickr albums</button>
             </AdminForm>
             <AdminForm method="post">
               <input type="hidden" name="_action" value="sync_flickr_albums" />
               <input type="hidden" name="galleryId" value={gallery.id} />
-              <input type="hidden" name="returnSearch" value={location.search} />
+              <input type="hidden" name="returnSearch" value={filterReturnSearch} />
               <button className="cg-secondary" type="submit">Sync and repair</button>
             </AdminForm>
           </div>
@@ -536,21 +520,34 @@ export default function Index() {
         {cards.length ? (
           <>
           <div className="cg-filter-panel">
-            <Form method="get" action="/app" className="cg-form cg-filter-form">
-              <ShopifyContextInputs search={location.search} galleryId={gallery.id} />
-
+            <div className="cg-form cg-filter-form">
               <label>
                 <span>Search albums</span>
                 <input
-                  name="q"
-                  defaultValue={filters.q}
+                  value={filters.q}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      q: event.currentTarget.value,
+                    }))
+                  }
                   placeholder="BMW, RFX11, reference ID..."
                 />
               </label>
 
               <label>
                 <span>Category</span>
-                <select name="category" defaultValue={filters.category}>
+                <select
+                  value={filters.category}
+                  onChange={(event) => {
+                    const category = normalizeFilterCategory(event.currentTarget.value);
+                    setFilters((current) => ({
+                      ...current,
+                      category,
+                      brand: category === "wheel" ? "" : current.brand,
+                    }));
+                  }}
+                >
                   <option value="all">All</option>
                   <option value="car">Cars</option>
                   <option value="wheel">Wheels</option>
@@ -559,7 +556,18 @@ export default function Index() {
 
               <label>
                 <span>Vehicle make</span>
-                <select name="brand" defaultValue={filters.brand}>
+                <select
+                  value={filters.brand}
+                  onChange={(event) => {
+                    const brand = event.currentTarget.value;
+                    setFilters((current) => ({
+                      ...current,
+                      brand,
+                      category: brand ? "car" : current.category,
+                      q: "",
+                    }));
+                  }}
+                >
                   <option value="">All makes</option>
                   {brandSummaries.map((brand) => (
                     <option key={brand.slug} value={brand.slug}>
@@ -569,38 +577,41 @@ export default function Index() {
                 </select>
               </label>
 
-              <button type="submit">Filter</button>
-              <a className="cg-reset-link" href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "", q: "" })}>
+              <button
+                type="button"
+                onClick={() => setFilters({ brand: "", category: "all", q: "" })}
+              >
                 Reset
-              </a>
-            </Form>
+              </button>
+            </div>
 
             <div className="cg-brand-filter-list" aria-label="Filter by make">
-              <a
-                className={`cg-pill ${!filters.brand && filters.category !== "wheel" ? "is-active" : ""}`}
-                href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "car" })}
+              <button
+                className={`cg-pill cg-pill-button ${!filters.brand && filters.category !== "wheel" ? "is-active" : ""}`}
+                onClick={() => setFilters({ brand: "", category: "car", q: "" })}
+                type="button"
               >
                 All car makes
-              </a>
+              </button>
               {brandSummaries.map((brand) => (
-                <a
-                  className={`cg-pill ${filters.brand === brand.slug ? "is-active" : ""}`}
-                  href={getFilterPath(location.search, {
-                    gallery: gallery.id,
-                    brand: brand.slug,
-                    category: "car",
-                  })}
+                <button
+                  className={`cg-pill cg-pill-button ${filters.brand === brand.slug ? "is-active" : ""}`}
+                  onClick={() =>
+                    setFilters({ brand: brand.slug, category: "car", q: "" })
+                  }
                   key={brand.slug}
+                  type="button"
                 >
                   {brand.name} ({brand.totalCount})
-                </a>
+                </button>
               ))}
-              <a
-                className={`cg-pill ${filters.category === "wheel" ? "is-active" : ""}`}
-                href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "wheel" })}
+              <button
+                className={`cg-pill cg-pill-button ${filters.category === "wheel" ? "is-active" : ""}`}
+                onClick={() => setFilters({ brand: "", category: "wheel", q: "" })}
+                type="button"
               >
                 Wheels ({stats.wheels})
-              </a>
+              </button>
             </div>
 
             <p className="cg-muted">
@@ -611,7 +622,7 @@ export default function Index() {
           <AdminForm method="post" className="cg-form cg-bulk-form">
             <input type="hidden" name="_action" value="bulk_update_albums" />
             <input type="hidden" name="galleryId" value={gallery.id} />
-            <input type="hidden" name="returnSearch" value={location.search} />
+            <input type="hidden" name="returnSearch" value={filterReturnSearch} />
 
             <div className="cg-bulk-header">
               <p className="cg-muted">
@@ -865,14 +876,10 @@ function getCardBrand(card: { vehicleBrand: string }) {
   return card.vehicleBrand.trim() || "Other";
 }
 
-function getFilterPath(
+function getSearchWithFilters(
   search: string,
-  updates: {
-    gallery?: string;
-    brand?: string;
-    category?: string;
-    q?: string;
-  },
+  galleryId: string,
+  filters: { brand: string; category: string; q: string },
 ) {
   const currentParams = new URLSearchParams(search);
   const nextParams = new URLSearchParams();
@@ -882,18 +889,15 @@ function getFilterPath(
     if (value) nextParams.set(key, value);
   });
 
-  const gallery = updates.gallery ?? currentParams.get("gallery");
-  const brand = updates.brand ?? currentParams.get("brand");
-  const category = updates.category ?? currentParams.get("category");
-  const q = updates.q ?? currentParams.get("q");
-
-  if (gallery) nextParams.set("gallery", gallery);
-  if (brand) nextParams.set("brand", brand);
-  if (category && category !== "all") nextParams.set("category", category);
-  if (q) nextParams.set("q", q);
+  nextParams.set("gallery", galleryId);
+  if (filters.brand) nextParams.set("brand", filters.brand);
+  if (filters.category && filters.category !== "all") {
+    nextParams.set("category", filters.category);
+  }
+  if (filters.q.trim()) nextParams.set("q", filters.q.trim());
 
   const query = nextParams.toString();
-  return `/app${query ? `?${query}` : ""}`;
+  return query ? `?${query}` : "";
 }
 
 async function createDefaultGallery(shop: string) {
@@ -1171,6 +1175,61 @@ function normalizeWheelType(value: string) {
   return value === "cross-forged" || value === "forged" ? value : "";
 }
 
+function getAlbumUpdateData(
+  formData: FormData,
+  card: {
+    title: string;
+    subtitle: string;
+    category: string;
+    vehicleBrand: string;
+    vehicleModel: string;
+    wheelType: string;
+    wheelSpecification: string;
+  },
+  getName: (field: string) => string,
+) {
+  const title = getString(formData, getName("title"), card.title);
+  const subtitle = getString(formData, getName("subtitle"));
+  const category = normalizeCategory(getString(formData, getName("category")));
+  const submittedBrand = getString(formData, getName("vehicleBrand"));
+  const submittedModel = getString(formData, getName("vehicleModel"));
+  let wheelType = normalizeWheelType(getString(formData, getName("wheelType")));
+  let vehicleBrand = submittedBrand;
+  let vehicleModel = submittedModel;
+
+  if (
+    hasMeaningfullyChanged(title, card.title) &&
+    category !== "wheel" &&
+    !hasMeaningfullyChanged(submittedBrand, card.vehicleBrand) &&
+    !hasMeaningfullyChanged(submittedModel, card.vehicleModel)
+  ) {
+    const inferred = inferAlbumMetadata(title);
+
+    if (inferred.category !== "wheel" && inferred.vehicleBrand) {
+      vehicleBrand = inferred.vehicleBrand;
+      vehicleModel = inferred.vehicleModel;
+      if (!wheelType && inferred.wheelType) {
+        wheelType = inferred.wheelType;
+      }
+    }
+  }
+
+  return {
+    title,
+    subtitle,
+    category,
+    isActive: formData.get(getName("isActive")) === "on",
+    vehicleBrand,
+    vehicleModel,
+    wheelType,
+    wheelSpecification: getString(formData, getName("wheelSpecification")),
+  };
+}
+
+function hasMeaningfullyChanged(nextValue: string, currentValue: string) {
+  return nextValue.trim() !== currentValue.trim();
+}
+
 function slugify(value: string) {
   return (
     value
@@ -1236,7 +1295,7 @@ function getActionRedirectPath(
   const returnSearch = getString(formData, "returnSearch");
 
   if (returnSearch) {
-    return getAppPathFromSearch(returnSearch, galleryId);
+    return getAppPathFromSearch(returnSearch, galleryId, true);
   }
 
   return getAppPath(request, galleryId);
@@ -1246,7 +1305,11 @@ function getAppPath(request: Request, galleryId?: string) {
   return getAppPathFromSearch(new URL(request.url).search, galleryId);
 }
 
-function getAppPathFromSearch(search: string, galleryId?: string) {
+function getAppPathFromSearch(
+  search: string,
+  galleryId?: string,
+  preserveFilters = false,
+) {
   const currentParams = new URLSearchParams(search);
   const appParams = new URLSearchParams();
 
@@ -1260,6 +1323,16 @@ function getAppPathFromSearch(search: string, galleryId?: string) {
 
   if (galleryId) {
     appParams.set("gallery", galleryId);
+  }
+
+  if (preserveFilters) {
+    const brand = currentParams.get("brand");
+    const category = currentParams.get("category");
+    const q = currentParams.get("q");
+
+    if (brand) appParams.set("brand", brand);
+    if (category && category !== "all") appParams.set("category", category);
+    if (q) appParams.set("q", q);
   }
 
   const query = appParams.toString();
@@ -1335,6 +1408,13 @@ const styles = `
     background: #111;
     border-color: #111;
     color: #fff;
+  }
+
+  .cg-pill-button {
+    appearance: none;
+    background: #fff;
+    cursor: pointer;
+    font: inherit;
   }
 
   .cg-form label,
