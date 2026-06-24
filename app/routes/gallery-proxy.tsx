@@ -25,6 +25,7 @@ type GalleryCardForResponse = {
   vehicleModel: string;
   wheelType: string;
   wheelSpecification: string;
+  flickrAlbumId: string;
   flickrAlbumUrl: string;
   flickrCoverUrl: string;
   photos: StoredGalleryPhoto[];
@@ -38,15 +39,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const url = new URL(request.url);
-  const galleryId = url.searchParams.get("gallery_id");
+  const galleryReference = parseGalleryReference(
+    url.searchParams.get("gallery_id") || "",
+  );
 
-  if (!galleryId) {
+  if (!galleryReference.galleryId) {
     return jsonResponse({ tabs: [] });
   }
 
   const gallery = await prisma.gallery.findFirst({
     where: {
-      id: galleryId,
+      id: galleryReference.galleryId,
       shop: session.shop,
     },
     include: {
@@ -86,7 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const preparedCards = await Promise.all(
     cards.map((card) => buildCardResponse(card, wheelModelImageByCode)),
   );
-  const tabs = buildStorefrontTabs(preparedCards);
+  const tabs = buildStorefrontTabs(preparedCards, galleryReference.filterSlug);
 
   return jsonResponse({
     id: gallery.id,
@@ -144,6 +147,7 @@ async function buildCardResponse(
 
   return {
     id: card.id,
+    referenceId: getReferenceId(card),
     title: getDisplayTitle(card),
     subtitle: getDisplaySubtitle(card),
     description: card.wheelSpecification || card.description,
@@ -166,9 +170,40 @@ async function buildCardResponse(
 
 type PreparedGalleryCard = Awaited<ReturnType<typeof buildCardResponse>>;
 
-function buildStorefrontTabs(cards: PreparedGalleryCard[]) {
+function buildStorefrontTabs(cards: PreparedGalleryCard[], filterSlug = "") {
   const carCards = cards.filter((card) => card.category !== "wheel");
   const wheelCards = cards.filter((card) => card.category === "wheel");
+  const normalizedFilterSlug = filterSlug.trim().toLowerCase();
+
+  if (normalizedFilterSlug === "wheels") {
+    return wheelCards.length
+      ? [
+          {
+            id: "wheel-albums",
+            title: "Wheels",
+            cards: wheelCards.sort(sortPreparedCards),
+          },
+        ]
+      : [];
+  }
+
+  if (normalizedFilterSlug) {
+    const brandCards = carCards.filter(
+      (card) => slugify(card.vehicleBrand.trim() || "Other") === normalizedFilterSlug,
+    );
+    const brandName = brandCards[0]?.vehicleBrand?.trim() || "Gallery";
+
+    return brandCards.length
+      ? [
+          {
+            id: `brand-${normalizedFilterSlug}`,
+            title: brandName,
+            cards: brandCards.sort(sortPreparedCards),
+          },
+        ]
+      : [];
+  }
+
   const brandNames = Array.from(
     new Set(carCards.map((card) => card.vehicleBrand.trim() || "Other")),
   ).sort((a, b) => a.localeCompare(b));
@@ -235,6 +270,22 @@ function slugify(value: string) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || "tab"
   );
+}
+
+function parseGalleryReference(value: string) {
+  const [galleryId, filterSlug = ""] = value.split("::");
+
+  return {
+    galleryId: galleryId.trim(),
+    filterSlug: filterSlug.trim().toLowerCase(),
+  };
+}
+
+function getReferenceId(card: GalleryCardForResponse) {
+  const source = card.flickrAlbumId || card.id;
+  const compactSource = source.replace(/[^a-z0-9]/gi, "").toUpperCase();
+
+  return `RW-${compactSource.slice(-6) || "BUILD"}`;
 }
 
 async function getCardPhotos(

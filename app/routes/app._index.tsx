@@ -40,6 +40,24 @@ type AutoRepairCard = {
   wheelType: string;
 };
 
+type AdminCard = {
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  color: string;
+  category: string;
+  isActive: boolean;
+  vehicleBrand: string;
+  vehicleModel: string;
+  wheelType: string;
+  wheelSpecification: string;
+  flickrAlbumId: string;
+  flickrAlbumUrl: string;
+  flickrCoverUrl: string;
+  referenceId: string;
+};
+
 const FLICKR_ALBUMS_URL =
   process.env.FLICKR_ALBUMS_URL ||
   "https://www.flickr.com/photos/rohanawheels/albums/";
@@ -117,7 +135,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const cards = gallery.tabs
     .flatMap((tab) => tab.cards)
+    .map((card) => ({
+      ...card,
+      referenceId: getReferenceId(card),
+    }))
     .sort(sortAdminCards);
+  const brandSummaries = getBrandSummaries(cards, gallery.id);
 
   const stats = {
     total: cards.length,
@@ -130,6 +153,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     galleries,
     gallery,
     cards,
+    brandSummaries,
     stats,
     proxyPath: "/apps/car-gallery",
     flickrAlbumsUrl: FLICKR_ALBUMS_URL,
@@ -173,11 +197,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return redirect(getAppPath(request, gallery.id));
     }
 
-    if (intent === "sync_flickr_albums") {
+    if (intent === "sync_flickr_albums" || intent === "refresh_flickr_albums") {
       const gallery = await findGalleryForShop(
         getString(formData, "galleryId"),
         session.shop,
       );
+      const shouldUpdateExisting = intent === "sync_flickr_albums";
       const tab = await ensurePrimaryTab(gallery.id);
       const albums = await fetchFlickrAlbums();
       const existingCards = await prisma.galleryCard.findMany({
@@ -200,6 +225,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const existingCard = existingByAlbumId.get(album.id);
 
         if (existingCard) {
+          if (!shouldUpdateExisting) continue;
+
           const inferred = inferAlbumMetadata(album.title);
 
           await prisma.galleryCard.update({
@@ -235,7 +262,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         createdCount += 1;
       }
 
-      return redirect(getAppPath(request, gallery.id));
+      return redirect(getActionRedirectPath(request, formData, gallery.id));
     }
 
     if (intent === "update_album") {
@@ -258,7 +285,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      return redirect(getAppPath(request, card.tab.galleryId));
+      return redirect(getActionRedirectPath(request, formData, card.tab.galleryId));
     }
 
     if (intent === "bulk_update_albums") {
@@ -266,6 +293,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         getString(formData, "galleryId"),
         session.shop,
       );
+      const deleteCardId = getString(formData, "deleteCardId");
+
+      if (deleteCardId) {
+        const card = await findCardForShop(deleteCardId, session.shop);
+
+        await prisma.galleryCard.delete({ where: { id: card.id } });
+        return redirect(getActionRedirectPath(request, formData, card.tab.galleryId));
+      }
+
       const cardIds = formData
         .getAll("cardId")
         .map((value) => (typeof value === "string" ? value : ""))
@@ -326,7 +362,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }),
       );
 
-      return redirect(getAppPath(request, gallery.id));
+      return redirect(getActionRedirectPath(request, formData, gallery.id));
     }
 
     throw new Error("Unknown action.");
@@ -343,17 +379,41 @@ function AdminForm({ action, ...props }: AdminFormProps) {
   return <Form {...props} action={action ?? getAppIndexActionPath(location.search)} />;
 }
 
+function ShopifyContextInputs({
+  search,
+  galleryId,
+}: {
+  search: string;
+  galleryId: string;
+}) {
+  const params = new URLSearchParams(search);
+
+  return (
+    <>
+      {SHOPIFY_CONTEXT_PARAMS.map((key) => {
+        const value = params.get(key);
+        return value ? <input key={key} type="hidden" name={key} value={value} /> : null;
+      })}
+      <input type="hidden" name="gallery" value={galleryId} />
+    </>
+  );
+}
+
 export default function Index() {
   const {
     galleries,
     gallery,
     cards,
+    brandSummaries,
     stats,
     proxyPath,
     flickrAlbumsUrl,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const location = useLocation();
+  const filters = getAdminFilters(location.search);
+  const filteredCards = filterAdminCards(cards, filters);
+  const wheelsThemeGalleryId = `${gallery.id}::wheels`;
 
   return (
     <s-page heading="Car Gallery">
@@ -405,13 +465,37 @@ export default function Index() {
 
           <div className="cg-copy-grid">
             <label>
-              <span>Gallery ID for the theme block</span>
+              <span>All makes gallery ID</span>
               <input readOnly value={gallery.id} />
             </label>
             <label>
               <span>Theme endpoint</span>
               <input readOnly value={proxyPath} />
             </label>
+          </div>
+
+          <div className="cg-brand-id-library">
+            <div>
+              <h3>Make-specific gallery IDs</h3>
+              <p className="cg-muted">
+                Use these IDs when a page should only show one make, like BMW.
+                The endpoint stays {proxyPath}.
+              </p>
+            </div>
+            <div className="cg-brand-id-grid">
+              {brandSummaries.map((brand) => (
+                <label key={brand.slug}>
+                  <span>{brand.name} ({brand.activeCount}/{brand.totalCount} active)</span>
+                  <input readOnly value={brand.themeGalleryId} />
+                </label>
+              ))}
+              {stats.wheels ? (
+                <label>
+                  <span>Wheels ({stats.wheels})</span>
+                  <input readOnly value={wheelsThemeGalleryId} />
+                </label>
+              ) : null}
+            </div>
           </div>
         </div>
       </s-section>
@@ -420,8 +504,8 @@ export default function Index() {
         <div className="cg-import">
           <div>
             <p className="cg-muted">
-              Syncs public albums from <a href={flickrAlbumsUrl}>{flickrAlbumsUrl}</a>.
-              Existing album settings stay intact; new albums are added as active.
+              Adds public albums from <a href={flickrAlbumsUrl}>{flickrAlbumsUrl}</a>.
+              Existing edited album settings are preserved.
             </p>
             <div className="cg-stats">
               <span>{stats.total} albums</span>
@@ -431,30 +515,114 @@ export default function Index() {
             </div>
           </div>
 
-          <AdminForm method="post">
-            <input type="hidden" name="_action" value="sync_flickr_albums" />
-            <input type="hidden" name="galleryId" value={gallery.id} />
-            <button type="submit">Sync Flickr albums</button>
-          </AdminForm>
+          <div className="cg-import-actions">
+            <AdminForm method="post">
+              <input type="hidden" name="_action" value="refresh_flickr_albums" />
+              <input type="hidden" name="galleryId" value={gallery.id} />
+              <input type="hidden" name="returnSearch" value={location.search} />
+              <button type="submit">Add new Flickr albums</button>
+            </AdminForm>
+            <AdminForm method="post">
+              <input type="hidden" name="_action" value="sync_flickr_albums" />
+              <input type="hidden" name="galleryId" value={gallery.id} />
+              <input type="hidden" name="returnSearch" value={location.search} />
+              <button className="cg-secondary" type="submit">Sync and repair</button>
+            </AdminForm>
+          </div>
         </div>
       </s-section>
 
       <s-section heading="Album curation">
         {cards.length ? (
+          <>
+          <div className="cg-filter-panel">
+            <Form method="get" action="/app" className="cg-form cg-filter-form">
+              <ShopifyContextInputs search={location.search} galleryId={gallery.id} />
+
+              <label>
+                <span>Search albums</span>
+                <input
+                  name="q"
+                  defaultValue={filters.q}
+                  placeholder="BMW, RFX11, reference ID..."
+                />
+              </label>
+
+              <label>
+                <span>Category</span>
+                <select name="category" defaultValue={filters.category}>
+                  <option value="all">All</option>
+                  <option value="car">Cars</option>
+                  <option value="wheel">Wheels</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Vehicle make</span>
+                <select name="brand" defaultValue={filters.brand}>
+                  <option value="">All makes</option>
+                  {brandSummaries.map((brand) => (
+                    <option key={brand.slug} value={brand.slug}>
+                      {brand.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button type="submit">Filter</button>
+              <a className="cg-reset-link" href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "", q: "" })}>
+                Reset
+              </a>
+            </Form>
+
+            <div className="cg-brand-filter-list" aria-label="Filter by make">
+              <a
+                className={`cg-pill ${!filters.brand && filters.category !== "wheel" ? "is-active" : ""}`}
+                href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "car" })}
+              >
+                All car makes
+              </a>
+              {brandSummaries.map((brand) => (
+                <a
+                  className={`cg-pill ${filters.brand === brand.slug ? "is-active" : ""}`}
+                  href={getFilterPath(location.search, {
+                    gallery: gallery.id,
+                    brand: brand.slug,
+                    category: "car",
+                  })}
+                  key={brand.slug}
+                >
+                  {brand.name} ({brand.totalCount})
+                </a>
+              ))}
+              <a
+                className={`cg-pill ${filters.category === "wheel" ? "is-active" : ""}`}
+                href={getFilterPath(location.search, { gallery: gallery.id, brand: "", category: "wheel" })}
+              >
+                Wheels ({stats.wheels})
+              </a>
+            </div>
+
+            <p className="cg-muted">
+              Showing {filteredCards.length} of {cards.length} albums.
+            </p>
+          </div>
+
           <AdminForm method="post" className="cg-form cg-bulk-form">
             <input type="hidden" name="_action" value="bulk_update_albums" />
             <input type="hidden" name="galleryId" value={gallery.id} />
+            <input type="hidden" name="returnSearch" value={location.search} />
 
             <div className="cg-bulk-header">
               <p className="cg-muted">
-                Edit as many albums as you want, then save everything together.
-                Brand tabs on the storefront are built from the active car albums.
+                Edit the visible albums, then save them together. Existing details
+                stay intact when you refresh Flickr for new albums.
               </p>
-              <button type="submit">Save all album changes</button>
+              <button type="submit">Save visible changes</button>
             </div>
 
             <div className="cg-albums">
-              {cards.map((card) => (
+              {filteredCards.map((card) => (
                 <article
                   className={`cg-album ${card.isActive ? "" : "is-inactive"}`}
                   key={card.id}
@@ -475,6 +643,13 @@ export default function Index() {
                   </a>
 
                   <div className="cg-album-fields">
+                    <div className="cg-album-meta">
+                      <span>Reference ID: {card.referenceId}</span>
+                      <a href={card.flickrAlbumUrl} target="_blank" rel="noreferrer">
+                        Open Flickr album
+                      </a>
+                    </div>
+
                     <div className="cg-album-primary">
                       <label className="cg-title-field">
                         <span>Album title</span>
@@ -553,15 +728,37 @@ export default function Index() {
                         />
                       </label>
                     </div>
+
+                    <div className="cg-row-actions">
+                      <button type="submit">Save visible changes</button>
+                      <button
+                        className="cg-danger"
+                        name="deleteCardId"
+                        onClick={(event) => {
+                          if (
+                            !window.confirm(
+                              `Delete ${card.title} from this app? This will not delete the Flickr album.`,
+                            )
+                          ) {
+                            event.preventDefault();
+                          }
+                        }}
+                        type="submit"
+                        value={card.id}
+                      >
+                        Delete from app
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
             </div>
 
             <div className="cg-bulk-footer">
-              <button type="submit">Save all album changes</button>
+              <button type="submit">Save visible changes</button>
             </div>
           </AdminForm>
+          </>
         ) : (
           <p className="cg-muted">Sync Flickr albums to start curating.</p>
         )}
@@ -581,6 +778,122 @@ function sortAdminCards(
     a.vehicleModel.localeCompare(b.vehicleModel),
     a.title.localeCompare(b.title),
   ].find((result) => result !== 0) || 0;
+}
+
+function getBrandSummaries(cards: AdminCard[], galleryId: string) {
+  const summaries = new Map<
+    string,
+    {
+      name: string;
+      slug: string;
+      themeGalleryId: string;
+      activeCount: number;
+      totalCount: number;
+    }
+  >();
+
+  cards
+    .filter((card) => card.category !== "wheel")
+    .forEach((card) => {
+      const name = getCardBrand(card);
+      const slug = slugify(name);
+      const current =
+        summaries.get(slug) || {
+          name,
+          slug,
+          themeGalleryId: `${galleryId}::${slug}`,
+          activeCount: 0,
+          totalCount: 0,
+        };
+
+      current.totalCount += 1;
+      if (card.isActive) current.activeCount += 1;
+      summaries.set(slug, current);
+    });
+
+  return Array.from(summaries.values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+}
+
+function getAdminFilters(search: string) {
+  const params = new URLSearchParams(search);
+
+  return {
+    brand: (params.get("brand") || "").trim().toLowerCase(),
+    category: normalizeFilterCategory(params.get("category") || "all"),
+    q: (params.get("q") || "").trim(),
+  };
+}
+
+function filterAdminCards(
+  cards: AdminCard[],
+  filters: { brand: string; category: string; q: string },
+) {
+  const query = filters.q.toLowerCase();
+
+  return cards.filter((card) => {
+    if (filters.category === "car" && card.category === "wheel") return false;
+    if (filters.category === "wheel" && card.category !== "wheel") return false;
+    if (filters.brand && slugify(getCardBrand(card)) !== filters.brand) return false;
+
+    if (!query) return true;
+
+    return [
+      card.referenceId,
+      card.title,
+      card.subtitle,
+      card.description,
+      card.color,
+      card.vehicleBrand,
+      card.vehicleModel,
+      card.wheelType,
+      card.wheelSpecification,
+      card.flickrAlbumId,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+}
+
+function normalizeFilterCategory(value: string) {
+  return value === "car" || value === "wheel" ? value : "all";
+}
+
+function getCardBrand(card: { vehicleBrand: string }) {
+  return card.vehicleBrand.trim() || "Other";
+}
+
+function getFilterPath(
+  search: string,
+  updates: {
+    gallery?: string;
+    brand?: string;
+    category?: string;
+    q?: string;
+  },
+) {
+  const currentParams = new URLSearchParams(search);
+  const nextParams = new URLSearchParams();
+
+  SHOPIFY_CONTEXT_PARAMS.forEach((key) => {
+    const value = currentParams.get(key);
+    if (value) nextParams.set(key, value);
+  });
+
+  const gallery = updates.gallery ?? currentParams.get("gallery");
+  const brand = updates.brand ?? currentParams.get("brand");
+  const category = updates.category ?? currentParams.get("category");
+  const q = updates.q ?? currentParams.get("q");
+
+  if (gallery) nextParams.set("gallery", gallery);
+  if (brand) nextParams.set("brand", brand);
+  if (category && category !== "all") nextParams.set("category", category);
+  if (q) nextParams.set("q", q);
+
+  const query = nextParams.toString();
+  return `/app${query ? `?${query}` : ""}`;
 }
 
 async function createDefaultGallery(shop: string) {
@@ -858,6 +1171,22 @@ function normalizeWheelType(value: string) {
   return value === "cross-forged" || value === "forged" ? value : "";
 }
 
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "gallery"
+  );
+}
+
+function getReferenceId(card: { flickrAlbumId: string; id: string }) {
+  const source = card.flickrAlbumId || card.id;
+  const compactSource = source.replace(/[^a-z0-9]/gi, "").toUpperCase();
+
+  return `RW-${compactSource.slice(-6) || "BUILD"}`;
+}
+
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
 
@@ -897,6 +1226,20 @@ function getFieldName(cardId: string, field: string) {
 function getActionErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
+}
+
+function getActionRedirectPath(
+  request: Request,
+  formData: FormData,
+  galleryId: string,
+) {
+  const returnSearch = getString(formData, "returnSearch");
+
+  if (returnSearch) {
+    return getAppPathFromSearch(returnSearch, galleryId);
+  }
+
+  return getAppPath(request, galleryId);
 }
 
 function getAppPath(request: Request, galleryId?: string) {
@@ -972,7 +1315,8 @@ const styles = `
   }
 
   .cg-gallery-list,
-  .cg-stats {
+  .cg-stats,
+  .cg-brand-filter-list {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -1023,7 +1367,8 @@ const styles = `
   }
 
   .cg-form button,
-  .cg-import button {
+  .cg-import button,
+  .cg-reset-link {
     border: 1px solid #1f1f1f;
     border-radius: 6px;
     background: #1f1f1f;
@@ -1033,16 +1378,37 @@ const styles = `
     font-weight: 700;
     min-height: 38px;
     padding: 8px 12px;
+    text-align: center;
+    text-decoration: none;
   }
 
   .cg-form button:hover,
-  .cg-import button:hover {
+  .cg-import button:hover,
+  .cg-reset-link:hover {
     background: #000;
+  }
+
+  .cg-secondary,
+  .cg-reset-link {
+    background: #fff !important;
+    border-color: #8a8a8a !important;
+    color: #202020 !important;
+  }
+
+  .cg-danger {
+    background: #fff !important;
+    border-color: #c0392b !important;
+    color: #b42318 !important;
   }
 
   .cg-import {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
+  }
+
+  .cg-import-actions {
+    display: grid;
+    gap: 8px;
   }
 
   .cg-muted {
@@ -1052,6 +1418,48 @@ const styles = `
 
   .cg-muted a {
     color: inherit;
+  }
+
+  .cg-brand-id-library {
+    display: grid;
+    gap: 12px;
+    border-top: 1px solid #dedede;
+    padding-top: 16px;
+  }
+
+  .cg-brand-id-library h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+
+  .cg-brand-id-library p {
+    margin: 0;
+  }
+
+  .cg-brand-id-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+
+  .cg-filter-panel {
+    display: grid;
+    gap: 14px;
+    border: 1px solid #dedede;
+    border-radius: 8px;
+    background: #fff;
+    padding: 14px;
+  }
+
+  .cg-filter-panel p {
+    margin: 0;
+  }
+
+  .cg-filter-form {
+    display: grid;
+    grid-template-columns: minmax(240px, 1.2fr) minmax(140px, 0.55fr) minmax(180px, 0.7fr) auto auto;
+    align-items: end;
+    gap: 12px;
   }
 
   .cg-bulk-form {
@@ -1127,6 +1535,22 @@ const styles = `
     align-content: start;
   }
 
+  .cg-album-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    color: #616161;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.3;
+    text-transform: uppercase;
+  }
+
+  .cg-album-meta a {
+    color: inherit;
+  }
+
   .cg-album-primary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
@@ -1157,6 +1581,13 @@ const styles = `
     min-height: 38px;
   }
 
+  .cg-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
   .cg-title-field,
   .cg-spec-field {
     grid-column: 1 / -1;
@@ -1180,6 +1611,7 @@ const styles = `
     .cg-inline-form,
     .cg-copy-grid,
     .cg-import,
+    .cg-filter-form,
     .cg-bulk-header,
     .cg-bulk-footer,
     .cg-albums,

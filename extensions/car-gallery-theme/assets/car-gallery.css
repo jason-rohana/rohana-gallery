@@ -132,6 +132,14 @@
   text-transform: uppercase;
 }
 
+.car-gallery__reference {
+  color: var(--car-gallery-card-text);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
 .car-gallery__color {
   color: var(--car-gallery-card-text);
   font-size: 13px;
@@ -233,6 +241,15 @@
   color: rgba(255, 255, 255, 0.82);
   font-size: 15px;
   line-height: 1.6;
+}
+
+.car-gallery__modal-reference {
+  margin: 16px 0 0;
+  color: #e2bd32;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.4;
+  text-transform: uppercase;
 }
 
 .car-gallery__modal-color {

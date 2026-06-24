@@ -67,6 +67,7 @@
     const url = new URL(productUrl, window.location.origin);
     const contactAnchor = root.dataset.contactAnchor || "contact-us";
     const reference = [
+      card.referenceId ? `Reference ${card.referenceId}` : "",
       card.title,
       card.wheelModel.code,
       card.color ? `${card.color} finish` : "",
@@ -77,6 +78,7 @@
 
     url.searchParams.set("contact_source", "car_gallery_viewer");
     url.searchParams.set("gallery_reference", reference);
+    if (card.referenceId) url.searchParams.set("gallery_reference_id", card.referenceId);
     url.searchParams.set("gallery_vehicle", card.title);
     url.searchParams.set("gallery_wheel_model", card.wheelModel.code);
     if (card.color) url.searchParams.set("gallery_finish", card.color);
@@ -188,6 +190,7 @@
     const subtitle = String(card.subtitle || "");
     const description = String(card.description || "");
     const color = String(card.color || "");
+    const referenceId = String(card.referenceId || "");
     const wheelModel = safeWheelModel(card);
     const button = createElement("button", "car-gallery__card");
     const photoWrap = createElement("span", "car-gallery__photo");
@@ -208,6 +211,11 @@
 
     caption.appendChild(createElement("span", "car-gallery__title", title));
 
+    if (referenceId) {
+      caption.appendChild(
+        createElement("span", "car-gallery__reference", `Ref: ${referenceId}`),
+      );
+    }
     if (subtitle) caption.appendChild(createElement("span", "car-gallery__subtitle", subtitle));
     if (color) caption.appendChild(createElement("span", "car-gallery__color", color));
     if (description) caption.appendChild(createElement("span", "car-gallery__description", description));
@@ -215,7 +223,7 @@
     button.appendChild(photoWrap);
     button.appendChild(caption);
     button.addEventListener("click", () =>
-      openModal(root, { title, subtitle, description, color, wheelModel, photos }),
+      openModal(root, { title, subtitle, description, color, referenceId, wheelModel, photos }),
     );
 
     return button;
@@ -242,6 +250,7 @@
       '<aside class="car-gallery__modal-info">',
       '<p class="car-gallery__modal-kicker" data-car-gallery-modal-subtitle></p>',
       '<h2 class="car-gallery__modal-title" data-car-gallery-modal-title></h2>',
+      '<p class="car-gallery__modal-reference" data-car-gallery-modal-reference></p>',
       '<p class="car-gallery__modal-color" data-car-gallery-modal-color></p>',
       '<p class="car-gallery__modal-description" data-car-gallery-modal-description></p>',
       '<div class="car-gallery__wheel-stock" data-car-gallery-wheel-stock hidden>',
@@ -273,6 +282,7 @@
     const image = modal.querySelector("[data-car-gallery-modal-image]");
     const title = modal.querySelector("[data-car-gallery-modal-title]");
     const subtitle = modal.querySelector("[data-car-gallery-modal-subtitle]");
+    const reference = modal.querySelector("[data-car-gallery-modal-reference]");
     const color = modal.querySelector("[data-car-gallery-modal-color]");
     const description = modal.querySelector("[data-car-gallery-modal-description]");
     const wheelStock = modal.querySelector("[data-car-gallery-wheel-stock]");
@@ -287,6 +297,7 @@
 
     title.textContent = card.title;
     subtitle.textContent = card.subtitle;
+    reference.textContent = card.referenceId ? `Reference ID: ${card.referenceId}` : "";
     color.textContent = card.color ? `Color: ${card.color}` : "";
     description.textContent = card.description;
     wheelStock.hidden = !card.wheelModel.imageUrl;
