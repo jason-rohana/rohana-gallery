@@ -171,8 +171,9 @@ async function buildCardResponse(
 type PreparedGalleryCard = Awaited<ReturnType<typeof buildCardResponse>>;
 
 function buildStorefrontTabs(cards: PreparedGalleryCard[], filterSlug = "") {
-  const carCards = cards.filter((card) => card.category !== "wheel");
+  const carCards = cards.filter((card) => card.category === "car");
   const wheelCards = cards.filter((card) => card.category === "wheel");
+  const eventCards = cards.filter((card) => card.category === "event");
   const normalizedFilterSlug = filterSlug.trim().toLowerCase();
 
   if (normalizedFilterSlug === "wheels") {
@@ -182,6 +183,18 @@ function buildStorefrontTabs(cards: PreparedGalleryCard[], filterSlug = "") {
             id: "wheel-albums",
             title: "Wheels",
             cards: wheelCards.sort(sortPreparedCards),
+          },
+        ]
+      : [];
+  }
+
+  if (normalizedFilterSlug === "events") {
+    return eventCards.length
+      ? [
+          {
+            id: "event-albums",
+            title: "Events",
+            cards: eventCards.sort(sortPreparedCards),
           },
         ]
       : [];
@@ -215,18 +228,24 @@ function buildStorefrontTabs(cards: PreparedGalleryCard[], filterSlug = "") {
       .sort(sortPreparedCards),
   }));
 
-  if (!wheelCards.length) {
-    return brandTabs;
-  }
+  const extraTabs = [
+    wheelCards.length
+      ? {
+          id: "wheel-albums",
+          title: "Wheels",
+          cards: wheelCards.sort(sortPreparedCards),
+        }
+      : null,
+    eventCards.length
+      ? {
+          id: "event-albums",
+          title: "Events",
+          cards: eventCards.sort(sortPreparedCards),
+        }
+      : null,
+  ].filter((tab): tab is NonNullable<typeof tab> => Boolean(tab));
 
-  return [
-    ...brandTabs,
-    {
-      id: "wheel-albums",
-      title: "Wheels",
-      cards: wheelCards.sort(sortPreparedCards),
-    },
-  ];
+  return [...brandTabs, ...extraTabs];
 }
 
 function sortPreparedCards(a: PreparedGalleryCard, b: PreparedGalleryCard) {
@@ -238,7 +257,7 @@ function getCardSortKey(card: PreparedGalleryCard) {
 }
 
 function getDisplayTitle(card: GalleryCardForResponse) {
-  if (card.category !== "wheel") {
+  if (card.category === "car") {
     const vehicleTitle = [card.vehicleBrand, card.vehicleModel]
       .map((value) => value.trim())
       .filter(Boolean)

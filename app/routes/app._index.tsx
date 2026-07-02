@@ -145,8 +145,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const stats = {
     total: cards.length,
     active: cards.filter((card) => card.isActive).length,
-    cars: cards.filter((card) => card.category !== "wheel").length,
+    cars: cards.filter((card) => card.category === "car").length,
     wheels: cards.filter((card) => card.category === "wheel").length,
+    events: cards.filter((card) => card.category === "event").length,
   };
 
   return {
@@ -384,6 +385,7 @@ export default function Index() {
     filters,
   );
   const wheelsThemeGalleryId = `${gallery.id}::wheels`;
+  const eventsThemeGalleryId = `${gallery.id}::events`;
   const selectedBrandSummary = brandSummaries.find(
     (brand) => brand.slug === filters.brand,
   );
@@ -393,6 +395,11 @@ export default function Index() {
           label: "Wheels",
           galleryId: wheelsThemeGalleryId,
         }
+      : filters.category === "event"
+        ? {
+            label: "Events",
+            galleryId: eventsThemeGalleryId,
+          }
       : selectedBrandSummary
         ? {
             label: selectedBrandSummary.name,
@@ -490,6 +497,7 @@ export default function Index() {
               <span>{stats.active} active</span>
               <span>{stats.cars} cars</span>
               <span>{stats.wheels} wheels</span>
+              <span>{stats.events} events</span>
             </div>
           </div>
 
@@ -538,13 +546,14 @@ export default function Index() {
                     setFilters((current) => ({
                       ...current,
                       category,
-                      brand: category === "wheel" ? "" : current.brand,
+                      brand: category === "car" ? current.brand : "",
                     }));
                   }}
                 >
                   <option value="all">All</option>
                   <option value="car">Cars</option>
                   <option value="wheel">Wheels</option>
+                  <option value="event">Events</option>
                 </select>
               </label>
 
@@ -606,13 +615,20 @@ export default function Index() {
               >
                 Wheels ({stats.wheels})
               </button>
+              <button
+                className={`cg-pill cg-pill-button ${filters.category === "event" ? "is-active" : ""}`}
+                onClick={() => setFilters({ brand: "", category: "event", q: "" })}
+                type="button"
+              >
+                Events ({stats.events})
+              </button>
             </div>
 
             <div className="cg-current-theme-block">
               <div>
                 <h3>Theme block for {currentThemeBlock.label}</h3>
                 <p className="cg-muted">
-                  Select a make or Wheels above to see only that gallery ID.
+                  Select a make, Wheels, or Events above to see only that gallery ID.
                 </p>
               </div>
               <label>
@@ -709,6 +725,7 @@ export default function Index() {
                         >
                           <option value="car">Car</option>
                           <option value="wheel">Wheel</option>
+                          <option value="event">Event</option>
                         </select>
                       </label>
 
@@ -815,7 +832,7 @@ function getBrandSummaries(cards: AdminCard[], galleryId: string) {
   >();
 
   cards
-    .filter((card) => card.category !== "wheel")
+    .filter((card) => card.category === "car")
     .forEach((card) => {
       const name = getCardBrand(card);
       const slug = slugify(name);
@@ -855,8 +872,7 @@ function filterAdminCards(
   const query = filters.q.toLowerCase();
 
   return cards.filter((card) => {
-    if (filters.category === "car" && card.category === "wheel") return false;
-    if (filters.category === "wheel" && card.category !== "wheel") return false;
+    if (filters.category !== "all" && card.category !== filters.category) return false;
     if (filters.brand && slugify(getCardBrand(card)) !== filters.brand) return false;
 
     if (!query) return true;
@@ -880,7 +896,9 @@ function filterAdminCards(
 }
 
 function normalizeFilterCategory(value: string) {
-  return value === "car" || value === "wheel" ? value : "all";
+  return value === "car" || value === "wheel" || value === "event"
+    ? value
+    : "all";
 }
 
 function getCardBrand(card: { vehicleBrand: string }) {
@@ -1179,6 +1197,7 @@ function inferWheelType(value: string) {
 }
 
 function normalizeCategory(value: string) {
+  if (value === "event") return "event";
   return value === "wheel" ? "wheel" : "car";
 }
 
@@ -1210,7 +1229,7 @@ function getAlbumUpdateData(
 
   if (
     hasMeaningfullyChanged(title, card.title) &&
-    category !== "wheel" &&
+    category === "car" &&
     !hasMeaningfullyChanged(submittedBrand, card.vehicleBrand) &&
     !hasMeaningfullyChanged(submittedModel, card.vehicleModel)
   ) {
