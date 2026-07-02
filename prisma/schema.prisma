@@ -71,6 +71,7 @@ model GalleryCard {
   flickrAlbumId      String         @default("")
   flickrAlbumUrl     String         @default("")
   flickrCoverUrl     String         @default("")
+  selectedCoverUrl   String         @default("")
   position           Int            @default(0)
   tab                GalleryTab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
   photos             GalleryPhoto[]

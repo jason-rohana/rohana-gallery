@@ -55,6 +55,7 @@ type AdminCard = {
   flickrAlbumId: string;
   flickrAlbumUrl: string;
   flickrCoverUrl: string;
+  selectedCoverUrl: string;
   referenceId: string;
 };
 
@@ -355,6 +356,104 @@ function AdminForm({ action, ...props }: AdminFormProps) {
   const location = useLocation();
 
   return <Form {...props} action={action ?? getAppIndexActionPath(location.search)} />;
+}
+
+function CoverPhotoPicker({
+  card,
+  fieldName,
+}: {
+  card: AdminCard;
+  fieldName: string;
+}) {
+  const location = useLocation();
+  const currentCoverUrl = getCardCoverUrl(card);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [photos, setPhotos] = useState<Array<{ id: string; url: string; alt: string }>>([]);
+  const [selectedUrl, setSelectedUrl] = useState(currentCoverUrl);
+
+  async function loadPhotos() {
+    if (photos.length) {
+      setIsOpen((value) => !value);
+      return;
+    }
+
+    setIsOpen(true);
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams(location.search);
+      params.set("albumUrl", card.flickrAlbumUrl);
+      const response = await fetch(`/app/flickr-photos?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error("Could not load Flickr photos.");
+      }
+
+      const payload = (await response.json()) as {
+        photos?: Array<{ id: string; url: string; alt: string }>;
+      };
+      const nextPhotos = payload.photos || [];
+
+      if (!nextPhotos.length) {
+        throw new Error("No Flickr photos found for this album.");
+      }
+
+      setPhotos(nextPhotos);
+      setSelectedUrl((current) => {
+        const matchingPhoto = nextPhotos.find(
+          (photo) => normalizeImageUrl(photo.url) === normalizeImageUrl(current),
+        );
+
+        return matchingPhoto?.url || nextPhotos[0]?.url || current;
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load Flickr photos.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <div className="cg-cover-picker">
+      {!isOpen ? <input type="hidden" name={fieldName} value={selectedUrl} /> : null}
+      <div className="cg-cover-picker-header">
+        <div>
+          <span>First shown photo</span>
+          <p className="cg-muted">This photo is used as the card cover and first viewer image.</p>
+        </div>
+        <button className="cg-secondary" type="button" onClick={loadPhotos}>
+          {isOpen ? "Hide cover choices" : "Choose cover photo"}
+        </button>
+      </div>
+
+      {isLoading ? <p className="cg-muted">Loading Flickr photos...</p> : null}
+      {error ? <p className="cg-error-text">{error}</p> : null}
+
+      {isOpen && photos.length ? (
+        <div className="cg-cover-options">
+          {photos.map((photo, index) => (
+            <label
+              className={`cg-cover-option ${selectedUrl === photo.url ? "is-selected" : ""}`}
+              key={photo.id}
+            >
+              <input
+                checked={selectedUrl === photo.url}
+                name={fieldName}
+                onChange={() => setSelectedUrl(photo.url)}
+                type="radio"
+                value={photo.url}
+              />
+              <img src={photo.url} alt={photo.alt || `Flickr photo ${index + 1}`} />
+              <span>Photo {index + 1}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function Index() {
@@ -673,8 +772,8 @@ export default function Index() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    {card.flickrCoverUrl ? (
-                      <img src={card.flickrCoverUrl} alt={card.title} />
+                    {getCardCoverUrl(card) ? (
+                      <img src={getCardCoverUrl(card)} alt={card.title} />
                     ) : (
                       <span>{card.title}</span>
                     )}
@@ -687,6 +786,8 @@ export default function Index() {
                         Open Flickr album
                       </a>
                     </div>
+
+                    <CoverPhotoPicker card={card} fieldName={getFieldName(card.id, "selectedCoverUrl")} />
 
                     <div className="cg-album-primary">
                       <label className="cg-title-field">
@@ -903,6 +1004,17 @@ function normalizeFilterCategory(value: string) {
 
 function getCardBrand(card: { vehicleBrand: string }) {
   return card.vehicleBrand.trim() || "Other";
+}
+
+function getCardCoverUrl(card: {
+  selectedCoverUrl: string;
+  flickrCoverUrl: string;
+}) {
+  return card.selectedCoverUrl || card.flickrCoverUrl;
+}
+
+function normalizeImageUrl(url: string) {
+  return url.replace(/_[a-z](\.[a-z0-9]+)$/i, "$1");
 }
 
 function getSearchWithFilters(
@@ -1215,6 +1327,7 @@ function getAlbumUpdateData(
     vehicleModel: string;
     wheelType: string;
     wheelSpecification: string;
+    selectedCoverUrl: string;
   },
   getName: (field: string) => string,
 ) {
@@ -1253,6 +1366,11 @@ function getAlbumUpdateData(
     vehicleModel,
     wheelType,
     wheelSpecification: getString(formData, getName("wheelSpecification")),
+    selectedCoverUrl: getString(
+      formData,
+      getName("selectedCoverUrl"),
+      card.selectedCoverUrl,
+    ),
   };
 }
 
@@ -1481,6 +1599,7 @@ const styles = `
 
   .cg-form button,
   .cg-import button,
+  .cg-cover-picker button,
   .cg-reset-link {
     border: 1px solid #1f1f1f;
     border-radius: 6px;
@@ -1497,6 +1616,7 @@ const styles = `
 
   .cg-form button:hover,
   .cg-import button:hover,
+  .cg-cover-picker button:hover,
   .cg-reset-link:hover {
     background: #000;
   }
@@ -1638,6 +1758,79 @@ const styles = `
     display: grid;
     gap: 12px;
     align-content: start;
+  }
+
+  .cg-cover-picker {
+    display: grid;
+    gap: 10px;
+    border: 1px solid #e3e3e3;
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 12px;
+  }
+
+  .cg-cover-picker-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .cg-cover-picker-header p {
+    margin: 3px 0 0;
+  }
+
+  .cg-cover-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 10px;
+    max-height: 250px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .cg-cover-option {
+    position: relative;
+    display: grid;
+    gap: 6px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    padding: 6px;
+  }
+
+  .cg-cover-option.is-selected {
+    border-color: #111;
+  }
+
+  .cg-cover-option input {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: auto;
+  }
+
+  .cg-cover-option img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 5px;
+    display: block;
+    object-fit: cover;
+  }
+
+  .cg-cover-option span {
+    color: #303030;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  .cg-error-text {
+    color: #b42318;
+    font-weight: 700;
+    margin: 0;
   }
 
   .cg-album-meta {

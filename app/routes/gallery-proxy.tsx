@@ -28,6 +28,7 @@ type GalleryCardForResponse = {
   flickrAlbumId: string;
   flickrAlbumUrl: string;
   flickrCoverUrl: string;
+  selectedCoverUrl: string;
   photos: StoredGalleryPhoto[];
 };
 
@@ -142,6 +143,7 @@ async function buildCardResponse(
   const photos = await getCardPhotos(
     card.flickrAlbumUrl,
     card.flickrCoverUrl,
+    card.selectedCoverUrl,
     card.photos,
   );
 
@@ -310,6 +312,7 @@ function getReferenceId(card: GalleryCardForResponse) {
 async function getCardPhotos(
   flickrAlbumUrl: string,
   flickrCoverUrl: string,
+  selectedCoverUrl: string,
   storedPhotos: StoredGalleryPhoto[],
 ) {
   const savedPhotos = storedPhotos.map((photo) => ({
@@ -317,11 +320,12 @@ async function getCardPhotos(
     url: photo.url,
     alt: photo.alt,
   }));
-  const coverPhoto = flickrCoverUrl
+  const coverUrl = selectedCoverUrl || flickrCoverUrl;
+  const coverPhoto = coverUrl
     ? [
         {
           id: `flickr-cover-${getFlickrAlbumParts(flickrAlbumUrl)?.albumId || "album"}`,
-          url: flickrCoverUrl,
+          url: coverUrl,
           alt: "Flickr gallery cover image",
         },
       ]
@@ -334,10 +338,35 @@ async function getCardPhotos(
 
   try {
     const flickrPhotos = await getFlickrAlbumPhotos(flickrAlbumUrl);
-    return flickrPhotos.length ? flickrPhotos : fallbackPhotos;
+    return flickrPhotos.length
+      ? prioritizeSelectedCover(flickrPhotos, selectedCoverUrl)
+      : fallbackPhotos;
   } catch (error) {
     return fallbackPhotos;
   }
+}
+
+function prioritizeSelectedCover(
+  photos: GalleryPhotoResponse[],
+  selectedCoverUrl: string,
+) {
+  if (!selectedCoverUrl) return photos;
+
+  const selectedIndex = photos.findIndex(
+    (photo) => normalizeImageUrl(photo.url) === normalizeImageUrl(selectedCoverUrl),
+  );
+
+  if (selectedIndex <= 0) return photos;
+
+  return [
+    photos[selectedIndex],
+    ...photos.slice(0, selectedIndex),
+    ...photos.slice(selectedIndex + 1),
+  ];
+}
+
+function normalizeImageUrl(url: string) {
+  return url.replace(/_[a-z](\.[a-z0-9]+)$/i, "$1");
 }
 
 async function getFlickrAlbumPhotos(albumUrl: string) {
